@@ -12,6 +12,8 @@ import numpy as np
 import torch
 import re
 
+import evaluate
+
 logger = logging.getLogger(__name__)
 
 class AbstractTask(abc.ABC):
@@ -49,7 +51,8 @@ class AbstractTask(abc.ABC):
         return {'source': ' '.join(sources),
                 'target': ' '.join(targets),
                 'task': self.name,
-                'extra_fields': extra_fields}
+                # 'extra_fields': extra_fields
+                }
 
     def check_n_obs(self, n_obs, total_size):
         if n_obs is not None and n_obs > total_size:
@@ -59,8 +62,12 @@ class AbstractTask(abc.ABC):
    
     def shuffled_indices(self, dataset):
         num_samples = len(dataset)
-        generator = torch.Generator()
-        generator.manual_seed(self.seed)
+        
+        generator = None
+        if self.seed is not None:
+            generator = torch.Generator()
+            generator.manual_seed(self.seed)
+
         return torch.randperm(num_samples, generator=generator).tolist()
 
     def subsample(self, dataset, n_obs=None, indices=None):
@@ -79,7 +86,7 @@ class AbstractTask(abc.ABC):
         return dataset.select(indices)
 
     def load_dataset(self, split: int):
-        return datasets.load_dataset(self.name, self.config, split=split, script_version="master")
+        return datasets.load_dataset(self.name, self.config, split=split)
 
     def get_split_indices(self, split, dataset, validation_size):
         indices = self.shuffled_indices(dataset)
@@ -88,7 +95,7 @@ class AbstractTask(abc.ABC):
         else:
             return indices[validation_size:]
         
-    def map_dataset(self, dataset, add_prefix):    
+    def map_dataset(self, dataset, add_prefix):
         return dataset.map(functools.partial(self.preprocessor, add_prefix=add_prefix),
                            remove_columns=dataset.column_names)
 
@@ -122,7 +129,7 @@ class Squad(AbstractTask):
     metric = [metrics.squad]
 
     def load_dataset(self, split):
-        return datasets.load_dataset(self.name, split=split, script_version="master")
+        return datasets.load_dataset(self.name, split=split)
 
     def preprocessor(self, example, add_prefix):
         answer = pad_punctuation(example['answers']['text'][0])
@@ -134,7 +141,17 @@ class Squad(AbstractTask):
         return self.seq2seq_format(source, target, add_prefix)
 
 
-class MRPC(AbstractTask):
+class GLUE(AbstractTask):
+    benchmark_name = "glue"
+
+    def load_dataset(self, split):
+        return datasets.load_dataset(self.benchmark_name, self.name, split=split)
+
+    def load_metric(self):
+        return evaluate.load(self.benchmark_name, self.name)
+ 
+
+class MRPC(GLUE):
     name = "mrpc"
     labels_list = ["0", "1"]
     metric = [metrics.f1_score_with_invalid, metrics.accuracy]
@@ -143,9 +160,6 @@ class MRPC(AbstractTask):
                            "validation": "validation",
                            "test": "validation"}
 
-    def load_dataset(self, split):
-        return datasets.load_dataset('glue', 'mrpc', split=split, script_version="master")
-
     def preprocessor(self, example, add_prefix=True):
         src_texts = ["sentence1:", example['sentence1'],
                      "sentence2:", example["sentence2"]]
@@ -153,7 +167,7 @@ class MRPC(AbstractTask):
         return self.seq2seq_format(src_texts, tgt_texts, add_prefix)
 
 
-class COLA(AbstractTask):
+class COLA(GLUE):
     name = "cola"
     labels_list = ["0", "1"]
     metric = [metrics.matthews_corrcoef]
@@ -162,17 +176,13 @@ class COLA(AbstractTask):
                            "validation": "validation",
                            "test": "validation"}
 
-    def load_dataset(self, split):
-        return datasets.load_dataset('glue', 'cola',
-                                     split=split, script_version="master")
-
     def preprocessor(self, example, add_prefix=True):
         src_texts = ["sentence:", example['sentence']]
         tgt_texts = [str(example['label'])]
         return self.seq2seq_format(src_texts, tgt_texts, add_prefix)
 
 
-class SST2(AbstractTask):
+class SST2(GLUE):
     name = "sst2"
     labels_list = ["0", "1"]
     metric = [metrics.accuracy]
@@ -181,17 +191,13 @@ class SST2(AbstractTask):
                            "validation": "validation",
                            "test": "validation"}
 
-    def load_dataset(self, split):
-        return datasets.load_dataset('glue', 'sst2',
-                                     split=split, script_version="master")
-
     def preprocessor(self, example, add_prefix=True):
         src_texts = ["sentence:", example['sentence']]
         tgt_texts = [str(example['label'])]
         return self.seq2seq_format(src_texts, tgt_texts, add_prefix)
 
 
-class STSB(AbstractTask):
+class STSB(GLUE):
     name = "stsb"
     labels_list = [str(np.round(label, decimals=1)) for label in np.arange(0, 5.2, 0.2)]
     metric = [metrics.pearson_corrcoef, metrics.spearman_corrcoef]
@@ -200,10 +206,6 @@ class STSB(AbstractTask):
                            "validation": "validation",
                            "test": "validation"}
 
-    def load_dataset(self, split):
-        return datasets.load_dataset('glue', 'stsb',
-                                     split=split, script_version="master")
-
     def preprocessor(self, example, add_prefix=True):
         src_texts = ["sentence1:", example['sentence1'],
                      "sentence2:", example["sentence2"]]
@@ -211,7 +213,7 @@ class STSB(AbstractTask):
         return self.seq2seq_format(src_texts, tgt_texts, add_prefix)
 
 
-class QQP(AbstractTask):
+class QQP(GLUE):
     name = "qqp"
     labels_list = ["0", "1"]
     metric = [metrics.f1_score_with_invalid, metrics.accuracy]
@@ -220,10 +222,6 @@ class QQP(AbstractTask):
                            "validation": "validation",
                            "test": "validation"}
 
-    def load_dataset(self, split):
-        return datasets.load_dataset('glue', 'qqp',
-                                     split=split, script_version="master")
-
     def preprocessor(self, example, add_prefix=True):
         src_texts = ["question1:", example['question1'],
                      "question2:", example["question2"]]
@@ -231,7 +229,7 @@ class QQP(AbstractTask):
         return self.seq2seq_format(src_texts, tgt_texts, add_prefix)
 
 
-class MNLI(AbstractTask):
+class MNLI(GLUE):
     name = "mnli"
     labels_list = ["0", "1", "2"]
     split_to_data_split = {"train": "train",
@@ -240,10 +238,6 @@ class MNLI(AbstractTask):
     metric = [metrics.accuracy]
     metric_names = ["accuracy"]
 
-
-    def load_dataset(self, split):
-        return datasets.load_dataset('glue', 'mnli', split=split, script_version="master")
-
     def preprocessor(self, example, add_prefix=True):
         src_texts = ["premise:", example['premise'],
                      "hypothesis", example["hypothesis"]]
@@ -251,7 +245,7 @@ class MNLI(AbstractTask):
         return self.seq2seq_format(src_texts, tgt_texts, add_prefix)
 
 
-class QNLI(AbstractTask):
+class QNLI(GLUE):
     name = "qnli"
     labels_list = ["0", "1"]
     metric = [metrics.accuracy]
@@ -260,16 +254,14 @@ class QNLI(AbstractTask):
                            "validation": "validation",
                            "test": "validation"}
 
-    def load_dataset(self, split):
-        return datasets.load_dataset('glue', 'qnli', split=split, script_version="master")
-
     def preprocessor(self, example, add_prefix=True):
         src_texts = ["question:", example['question'],
                      "sentence:", example["sentence"]]
         tgt_texts = [str(example['label'])]
         return self.seq2seq_format(src_texts, tgt_texts, add_prefix)
 
-class RTE(AbstractTask):
+
+class RTE(GLUE):
     name = "rte"
     labels_list = ["0", "1"]
     metric = [metrics.accuracy]
@@ -278,10 +270,6 @@ class RTE(AbstractTask):
                            "validation": "validation",
                            "test": "validation"}
 
-    def load_dataset(self, split):
-        return datasets.load_dataset('glue', 'rte',
-                                     split=split, script_version="master")
-
     def preprocessor(self, example, add_prefix=True):
         src_texts = ["sentence1:", example['sentence1'],
                      "sentence2:", example["sentence2"]]
@@ -289,7 +277,7 @@ class RTE(AbstractTask):
         return self.seq2seq_format(src_texts, tgt_texts, add_prefix)
 
 
-class WNLI(AbstractTask):
+class WNLI(GLUE):
     name = "wnli"
     labels_list = ["0", "1"]
     metric = [metrics.accuracy]
@@ -298,9 +286,6 @@ class WNLI(AbstractTask):
                            "validation": "validation",
                            "test": "validation"}
 
-    def load_dataset(self, split):
-        return datasets.load_dataset('glue', 'wnli', split=split, script_version="master")
-
     def preprocessor(self, example, add_prefix=True):
         src_texts = ["sentence1:", example['sentence1'],
                      "sentence2:", example["sentence2"]]
@@ -308,7 +293,17 @@ class WNLI(AbstractTask):
         return self.seq2seq_format(src_texts, tgt_texts, add_prefix)
 
 
-class SuperGLUEBoolQ(AbstractTask):
+class SUPERGLUE(AbstractTask):
+    benchmark_name = "super_glue"
+
+    def load_dataset(self, split):
+        return datasets.load_dataset(self.benchmark_name, self.name.split("-")[-1], split=split)
+
+    def load_metric(self):
+        return evaluate.load(self.benchmark_name, self.name.split("-")[-1])
+ 
+
+class SuperGLUEBoolQ(SUPERGLUE):
     name="superglue-boolq"
     labels_list = ['0', '1']
     metric = [metrics.accuracy]
@@ -317,16 +312,13 @@ class SuperGLUEBoolQ(AbstractTask):
                            "validation": "validation",
                            "test": "validation"}
 
-    def load_dataset(self, split):
-        return datasets.load_dataset('super_glue', 'boolq', split=split, script_version="master")
-
     def preprocessor(self, example, add_prefix=True):
         src_texts = ["question:", example["question"], "passage:", example["passage"]]
         tgt_texts = [str(example["label"])]
         return self.seq2seq_format(src_texts, tgt_texts, add_prefix)
 
 
-class SuperGLUERTE(AbstractTask):
+class SuperGLUERTE(SUPERGLUE):
     name="superglue-rte"
     labels_list = ['0', '1']
     split_to_data_split = {"train": "train",
@@ -335,9 +327,6 @@ class SuperGLUERTE(AbstractTask):
     metric = [metrics.accuracy]
     metric_names = ["accuracy"]
 
-    def load_dataset(self, split):
-        return datasets.load_dataset('super_glue', 'rte', split=split, script_version="master")
-
     def preprocessor(self, example, add_prefix=True):
         src_texts = ["premise:", example["premise"],
                      "hypothesis:", example["hypothesis"]]
@@ -345,7 +334,7 @@ class SuperGLUERTE(AbstractTask):
         return self.seq2seq_format(src_texts, tgt_texts, add_prefix)
 
 
-class SuperGLUECB(AbstractTask):
+class SuperGLUECB(SUPERGLUE):
     name = "superglue-cb"
     labels_list = ['0', '1', '2']
     split_to_data_split = {"train": "train",
@@ -354,16 +343,13 @@ class SuperGLUECB(AbstractTask):
     metric = [metrics.mean_multiclass_f1(num_classes=3), metrics.accuracy]
     metric_names = ["f1_multiclass", "accuracy"]
 
-    def load_dataset(self, split):
-        return datasets.load_dataset('super_glue', 'cb', split=split, script_version="master")
-
     def preprocessor(self, example, add_prefix=True):
         src_texts = ["premise:", example["premise"], "hypothesis:", example["hypothesis"]]
         tgt_texts = [str(example["label"])]
         return self.seq2seq_format(src_texts, tgt_texts, add_prefix)
 
 
-class SuperGLUECOPA(AbstractTask):
+class SuperGLUECOPA(SUPERGLUE):
     name = "superglue-copa"
     labels_list = ['0', '1']
     split_to_data_split = {"train": "train",
@@ -371,9 +357,6 @@ class SuperGLUECOPA(AbstractTask):
                            "test": "validation"}
     metric = [metrics.accuracy]
     metric_names = ["accuracy"] 
-
-    def load_dataset(self, split):
-        return datasets.load_dataset('super_glue', 'copa', split=split, script_version="master")
 
     def preprocessor(self, example, add_prefix=True):
         src_texts = ["premise:", example["premise"], 
@@ -383,7 +366,7 @@ class SuperGLUECOPA(AbstractTask):
         return self.seq2seq_format(src_texts, tgt_texts, add_prefix)
 
 
-class SuperGLUEMultiRC(AbstractTask):
+class SuperGLUEMultiRC(SUPERGLUE):
     name = "superglue-multirc"
     labels_list = ['0', '1']
     split_to_data_split = {"train": "train",
@@ -392,9 +375,6 @@ class SuperGLUEMultiRC(AbstractTask):
     metric = [metrics.multirc_f1_over_all_answers,
               metrics.mean_group_metric(metrics.exact_match)]
     metric_names = ["f1", "em"]
-
-    def load_dataset(self, split):
-        return datasets.load_dataset('super_glue', 'multirc', split=split, script_version="master")
 
     def remove_markup(self, text):
         """Removes the HTML markup."""
@@ -415,7 +395,7 @@ class SuperGLUEMultiRC(AbstractTask):
 
    
 
-class SuperGLUEWIC(AbstractTask):
+class SuperGLUEWIC(SUPERGLUE):
     name = "superglue-wic"
     labels_list = ['0', '1']
     split_to_data_split = {"train": "train",
@@ -423,9 +403,6 @@ class SuperGLUEWIC(AbstractTask):
                            "test": "validation"}
     metric = [metrics.accuracy]
     metric_names = ["accuracy"] 
-
-    def load_dataset(self, split):
-        return datasets.load_dataset('super_glue', 'wic', split=split, script_version="master")
 
     def preprocessor(self, example, add_prefix=True):
         src_texts = ["sentence1:", example["sentence1"],
@@ -435,7 +412,7 @@ class SuperGLUEWIC(AbstractTask):
         return self.seq2seq_format(src_texts, tgt_texts, add_prefix)
 
 
-class SuperGLUEWSCFixed(AbstractTask):
+class SuperGLUEWSCFixed(SUPERGLUE):
     # source: https://github.com/google-research/text-to-text-transfer-transformer/blob/master/t5/data/preprocessors.py
     """Convert WSC examples to text2text format.
      WSC includes a sentence along with 2 'spans': the first denoting a noun and
@@ -465,9 +442,6 @@ class SuperGLUEWSCFixed(AbstractTask):
     metric = [metrics.accuracy]
     metric_names = ["accuracy"] 
 
-    def load_dataset(self, split):
-        return datasets.load_dataset('super_glue', 'wsc.fixed', split=split, script_version="master")
-
     def _mark_span(self, text, span_str, span_idx, mark):
         pattern_tmpl = r'^((?:\S+\s){N})(W)'
         pattern = re.sub('N', str(span_idx), pattern_tmpl)
@@ -486,7 +460,7 @@ class SuperGLUEWSCFixed(AbstractTask):
         return self.seq2seq_format(src_texts, tgt_texts, add_prefix)
 
 
-class SuperGLUERecord(AbstractTask):
+class SuperGLUERecord(SUPERGLUE):
     """Convert ReCoRD examples to text2text examples.
     ReCoRD contains a passage, query containing a '@placeholder' string, and a set
     of entities that are the possible values of the placeholder. Each train and
@@ -519,9 +493,6 @@ class SuperGLUERecord(AbstractTask):
     metric = [metrics.squad]
     metric_names = ["squad"] 
     
-    def load_dataset(self, split):
-        return datasets.load_dataset('super_glue', 'record', split=split, script_version="master")
-
     def preprocessor(self, batch, add_prefix=True):
         new_batch = collections.defaultdict(list)
         keys = batch.keys()

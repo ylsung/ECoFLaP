@@ -1,0 +1,7 @@
+{
+    "model_name_or_path": "test",
+    "seed": 99,
+    "save_steps": 600,
+    "adapter_non_linearity": "relu",
+    "output_dir": "json"
+}

@@ -1,0 +1,1 @@
+from seq2seq.methods.modify_model_with_petl import modify_model_with_petl

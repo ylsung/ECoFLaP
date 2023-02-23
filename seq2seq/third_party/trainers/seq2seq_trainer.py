@@ -5,12 +5,11 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 from torch.utils.data.dataset import Dataset
 from transformers import Seq2SeqTrainer 
-from .trainer import BaseTrainer 
 
 if version.parse(torch.__version__) >= version.parse("1.6"):
     from torch.cuda.amp import autocast
 
-class Seq2SeqTrainer(Seq2SeqTrainer, BaseTrainer):
+class Seq2SeqTrainer(Seq2SeqTrainer):
     def __init__(self, train_dataset_sizes=None, adapter_config=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.adapter_config = adapter_config

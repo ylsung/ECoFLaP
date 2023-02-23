@@ -46,8 +46,6 @@ from .configuration_t5 import T5Config
 from .modeling_outputs import SideBaseModelOutput, SideBaseModelOutputWithPastAndCrossAttentions, SideSeq2SeqModelOutput, SideSeq2SeqLMOutput
 
 from seq2seq.adapters import AdapterController
-from seq2seq.hypercomplex.layers import  PHMLinear
-from seq2seq.hypercomplex.inits import  glorot_uniform, glorot_normal
 from typing import Dict, Any
 from seq2seq.lora import LoRALinearController
 
@@ -1841,65 +1839,6 @@ class T5ForConditionalGeneration(T5PreTrainedModel):
        else:
            random_range = 0.5 
            self.prefix_shared.data.uniform_(-random_range, random_range)
-    
-    def set_phm_Ws(self):
-      def set_phm_Ws_helper(module): 
-        # TODO: we need to check there is one of these, and this is activated.
-        for name, sub_module in module.named_modules():
-            if isinstance(sub_module, PHMLinear) and "down_sampler" in name:
-                if self.factorized_phm:
-                    sub_module.set_W(W_left=self.W_down_left, W_right=self.W_down_right)
-                else:
-                    sub_module.set_W(W=self.W_down)
-            if isinstance(sub_module, PHMLinear) and "up_sampler" in name:
-                if self.factorized_phm:
-                    sub_module.set_W(W_left=self.W_up_left, W_right=self.W_up_right)
-                else:
-                    sub_module.set_W(W=self.W_up)
-
-      set_phm_Ws_helper(self.encoder) 
-      set_phm_Ws_helper(self.decoder) 
-
-    def init_W(self, in_feats_per_axis, out_feats_per_axis, W=None, W_left=None, W_right=None):
-        if self.w_init == "glorot-normal":
-            if self.factorized_phm:
-                for i in range(self.phm_dim):
-                    W_left.data[i] = glorot_normal(W_left.data[i])
-                    W_right.data[i] = glorot_normal(W_right.data[i])
-            else:
-                for i in range(self.phm_dim):
-                    W.data[i] = glorot_normal(W.data[i])
-        elif self.w_init == "glorot-uniform":
-            if self.factorized_phm:
-                for i in range(self.phm_dim):
-                    W_left.data[i] = glorot_uniform(W_left.data[i])
-                    W_right.data[i] = glorot_uniform(W_right.data[i])
-            else:
-                for i in range(self.phm_dim):
-                    W.data[i] = glorot_uniform(W.data[i])
-        elif self.w_init == "normal":
-            if self.factorized_phm:
-                for i in range(self.phm_dim):
-                    W_left.data[i].normal_(std=0.01)
-                    W_right.data[i].normal_(std=0.01)
-            else:
-                for i in range(self.phm_dim):
-                    W.data[i].normal_(std=0.01)
-        else:
-            raise ValueError
-
-    def set_phm_rule(self):
-      def set_phm_rule(module):
-        # TODO: we need to check there is one of these, and this is activated.
-        for name, sub_module in module.named_modules():
-            if isinstance(sub_module, PHMLinear):
-                if self.factorized_phm_rule:
-                    sub_module.set_phm_rule(phm_rule_right=self.phm_rule_right, 
-                                            phm_rule_left=self.phm_rule_left)
-                else:
-                    sub_module.set_phm_rule(phm_rule=self.phm_rule)
-      set_phm_rule(self.encoder)
-      set_phm_rule(self.decoder)
     ###########################################################
 
     @add_start_docstrings(PARALLELIZE_DOCSTRING)

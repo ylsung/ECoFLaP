@@ -1,1 +1,0 @@
-from .intrinsic import IntrinsicDimensionLight

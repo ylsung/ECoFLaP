@@ -19,16 +19,22 @@ Fine-tuning the library models for sequence to sequence.
 import functools
 import logging
 import torch 
+import re
 import os
 os.environ['MKL_THREADING_LAYER'] = 'GNU' 
 os.environ['MKL_SERVICE_FORCE_INTEL'] = '1'
 os.environ["WANDB_DISABLED"] = "true"
 import sys
 import subprocess
+import numpy as np
+
+# logging.disable(logging.WARNING)
+
 from typing import Optional, List
 
 from datasets import load_dataset, load_metric, concatenate_datasets
 import transformers
+import evaluate
 from transformers import (
     AutoTokenizer,
     HfArgumentParser,
@@ -37,18 +43,24 @@ from transformers import (
     set_seed,
 )
 from transformers.trainer_utils import is_main_process, get_last_checkpoint
-from seq2seq.utils import get_adapter_config
 from seq2seq.data import AutoTask
 from seq2seq.data import TaskDataCollatorForSeq2Seq, DataCollatorForT5MLM
-from seq2seq.third_party.trainers import Seq2SeqTrainer
-from training_args import AdapterTrainingArguments
-from seq2seq.utils import modify_model_after_init, save_training_config 
+# from seq2seq.third_party.trainers import Seq2SeqTrainer
+from training_args import TrainingArguments, ModelArguments, DataTrainingArguments, PETLModelArguments
+from seq2seq.utils import num_parameters, save_training_config
 from dataclasses import dataclass, field
-from transformers import Seq2SeqTrainingArguments 
-from seq2seq.third_party.models import T5Config, T5ForConditionalGeneration
+from transformers import Seq2SeqTrainer
+from transformers import DataCollatorForSeq2Seq
+# from seq2seq.third_party.models import T5Config, T5ForConditionalGeneration
+from transformers import T5Config, T5ForConditionalGeneration
 from seq2seq.data import AutoPostProcessor
 
+from seq2seq.methods import modify_model_with_petl
+from seq2seq.utils.utils import parse_args
+
+
 logger = logging.getLogger(__name__)
+
 
 def run_command(command):
     output = subprocess.getoutput(command)
@@ -76,177 +88,9 @@ TASK_TO_METRICS = {"mrpc": ["accuracy", "f1"],
                   "superglue-record": ["f1", "em"]
          }
 
-# run_seq2seq parameters.
-@dataclass
-class TrainingArguments(Seq2SeqTrainingArguments):
-    print_num_parameters: Optional[bool] = field(default=False, metadata={"help": "If set, print the parameters of "
-                                                                                 "the model."})
-    do_test: Optional[bool] = field(default=False, metadata={"help": "If set, evaluates the test performance."})
-    split_validation_test: Optional[bool] = field(default=False,
-                                                  metadata={"help": "If set, for the datasets which do not"
-                                                                    "have the test set, we use validation set as their"
-                                                                    "test set and make a validation set from either"
-                                                                    "splitting the validation set into half (for smaller"
-                                                                    "than 10K samples datasets), or by using 1K examples"
-                                                                    "from training set as validation set (for larger"
-                                                                    " datasets)."})
-    compute_time: Optional[bool] = field(default=False, metadata={"help": "If set measures the time."})
-    compute_memory: Optional[bool] = field(default=False, metadata={"help": "if set, measures the memory"})
-    prefix_length: Optional[int] = field(default=100, metadata={"help": "Defines the length for prefix tuning."})
 
-
-@dataclass
-class ModelArguments:
-    """
-    Arguments pertaining to which model/config/tokenizer we are going to fine-tune from.
-    """
-    model_name_or_path: str = field(
-        metadata={"help": "Path to pretrained model or model identifier from huggingface.co/models"}
-    )
-    config_name: Optional[str] = field(
-        default=None, metadata={"help": "Pretrained config name or path if not the same as model_name"}
-    )
-    tokenizer_name: Optional[str] = field(
-        default=None, metadata={"help": "Pretrained tokenizer name or path if not the same as model_name"}
-    )
-    cache_dir: Optional[str] = field(
-        default=None,
-        metadata={"help": "Where to store the pretrained models downloaded from huggingface.co"},
-    )
-    use_fast_tokenizer: bool = field(
-        default=True,
-        metadata={"help": "Whether to use one of the fast tokenizer (backed by the tokenizers library) or not."},
-    )
-    model_revision: str = field(
-        default="main",
-        metadata={"help": "The specific model version to use (can be a branch name, tag name or commit id)."},
-    )
-    use_auth_token: bool = field(
-        default=False,
-        metadata={
-            "help": "Will use the token generated when running `transformers-cli login` (necessary to use this script "
-            "with private models)."
-        },
-    )
-
-
-@dataclass
-class DataTrainingArguments:
-    """
-    Arguments pertaining to what data we are going to input our model for training and eval.
-    """
-    task_name: Optional[str] = field(
-        default=None, metadata={"help": "The name of the dataset to use (via the datasets library)."}
-    )
-    dataset_config_name: Optional[str] = field(
-        default=None, metadata={"help": "The configuration name of the dataset to use (via the datasets library)."}
-    )
-    eval_dataset_name: Optional[str] = field(
-        default=None, metadata={"help": "The name of the evaluation dataset to use (via the datasets library)."}
-    )
-    eval_dataset_config_name: Optional[str] = field(
-        default=None, metadata={"help": "The configuration name of the evaluation dataset to use (via the datasets library)."}
-    )
-    test_dataset_name: Optional[str] = field(
-        default=None, metadata={"help": "The name of the test dataset to use (via the datasets library)."}
-    )
-    test_dataset_config_name: Optional[str] = field(
-        default=None, metadata={"help": "The configuration name of the test dataset to use (via the datasets library)."}
-    )
-    overwrite_cache: bool = field(
-        default=False, metadata={"help": "Overwrite the cached training and evaluation sets"}
-    )
-    preprocessing_num_workers: Optional[int] = field(
-        default=None,
-        metadata={"help": "The number of processes to use for the preprocessing."},
-    )
-    max_source_length: Optional[int] = field(
-        default=128,
-        metadata={
-            "help": "The maximum total input sequence length after tokenization. Sequences longer "
-            "than this will be truncated, sequences shorter will be padded."
-        },
-    )
-    max_target_length: Optional[int] = field(
-        default=128,
-        metadata={
-            "help": "The maximum total sequence length for target text after tokenization. Sequences longer "
-            "than this will be truncated, sequences shorter will be padded."
-        },
-    )
-    val_max_target_length: Optional[int] = field(
-        default=None,
-        metadata={
-            "help": "The maximum total sequence length for validation target text after tokenization. Sequences longer "
-            "than this will be truncated, sequences shorter will be padded. Will default to `max_target_length`."
-            "This argument is also used to override the ``max_length`` param of ``model.generate``, which is used "
-            "during ``evaluate`` and ``predict``."
-        },
-    )
-    test_max_target_length: Optional[int] = field(
-        default=None,
-        metadata={
-            "help": "The maximum total sequence length for test target text after tokenization. Sequences longer "
-                    "than this will be truncated, sequences shorter will be padded. Will default to `max_target_length`."
-                    "This argument is also used to override the ``max_length`` param of ``model.generate``, which is used "
-                    "during ``evaluate`` and ``predict``."
-        },
-    )
-    pad_to_max_length: bool = field(
-        default=False,
-        metadata={
-            "help": "Whether to pad all samples to model maximum sentence length. "
-            "If False, will pad the samples dynamically when batching to the maximum length in the batch. More "
-            "efficient on GPU but very bad for TPU."
-        },
-    )
-    max_train_samples: Optional[int] = field(
-        default=None,
-        metadata={
-            "help": "For debugging purposes or quicker training, truncate the number of training examples to this "
-            "value if set."
-        },
-    )
-    max_val_samples: Optional[int] = field(
-        default=None,
-        metadata={
-            "help": "For debugging purposes or quicker training, truncate the number of validation examples to this "
-            "value if set."
-        },
-    )
-    max_test_samples: Optional[int] = field(
-        default=None,
-        metadata={"help": "For debugging purposes or quicker training, truncate the number of test examples to this "
-            "value if set."}
-    )
-    num_beams: Optional[int] = field(default=None, metadata={"help": "Number of beams to use for evaluation."})
-    ignore_pad_token_for_loss: bool = field(
-        default=True,
-        metadata={
-            "help": "Whether to ignore the tokens corresponding to padded labels in the loss computation or not."
-        },
-    )
-    task_adapters: Optional[List[str]] = field(
-        default=None,
-        metadata={"help": "Defines a dictionary from task adapters to the tasks."}
-    )
-    task_embeddings: Optional[List[str]] = field(
-        default=None,
-        metadata={"help": "Defines a dictionary from tasks to the tasks embeddings."}
-    )
-    data_seed: Optional[int] = field(default=42, metadata={"help": "seed used to shuffle the data."})
-
-    def __post_init__(self):
-        if self.task_name is None:
-            raise ValueError("Need either a dataset name or a training/validation file.")
-        if self.val_max_target_length is None:
-            self.val_max_target_length = self.max_target_length
-        if self.test_max_target_length is None:
-            self.test_max_target_length = self.max_target_length
-
-
-def resize_token_embeddings(adapter_args, model, tokenizer):
-    if adapter_args.create_side_lm:
+def resize_token_embeddings(petl_args, model, tokenizer):
+    if petl_args.create_side_lm:
         tmp_get_input_embeddings = model.get_input_embeddings
         tmp_set_input_embeddings = model.set_input_embeddings
         tmp_set_output_embeddings = model.set_output_embeddings
@@ -271,17 +115,9 @@ def resize_token_embeddings(adapter_args, model, tokenizer):
 
 
 def main():
-    # See all possible arguments in src/transformers/training_args.py
-    # or by passing the --help flag to this script.
-    # We now keep distinct sets of args, for a cleaner separation of concerns.
-    parser = HfArgumentParser((ModelArguments, DataTrainingArguments, TrainingArguments,
-                               AdapterTrainingArguments))
-    if len(sys.argv) == 2 and sys.argv[1].endswith(".json"):
-        # If we pass only one argument to the script and it's the path to a json file,
-        # let's parse it to get our arguments.
-        model_args, data_args, training_args, adapter_args = parser.parse_json_file(json_file=os.path.abspath(sys.argv[1]))
-    else:
-        model_args, data_args, training_args, adapter_args = parser.parse_args_into_dataclasses()
+    
+    model_args, data_args, training_args, petl_args = \
+        parse_args([ModelArguments, DataTrainingArguments, TrainingArguments, PETLModelArguments])
 
     # Detecting last checkpoint.
     last_checkpoint = None
@@ -350,33 +186,32 @@ def main():
         revision=model_args.model_revision,
         use_auth_token=True if model_args.use_auth_token else None,
     )
-    config.train_task_adapters = adapter_args.train_task_adapters
-    config.train_side_ladder = adapter_args.train_side_ladder
-    config.prefix_tuning = adapter_args.prefix_tuning
-    config.lambda_distill = adapter_args.lambda_distill
-    config.lambda_label = adapter_args.lambda_label
-    config.lambda_kd_ir = adapter_args.lambda_kd_ir
-    config.gate_T = adapter_args.gate_T
-    config.use_gate = adapter_args.use_gate
-    config.gate_alpha = adapter_args.gate_alpha
-    training_args.use_gate = adapter_args.use_gate
-    config.add_residual_after = adapter_args.add_residual_after
-    config.encoder_side_layers = adapter_args.encoder_side_layers
-    config.decoder_side_layers = adapter_args.decoder_side_layers
-    config.side_downsample_pool = adapter_args.side_downsample_pool
-    config.add_bias_sampling = adapter_args.add_bias_sampling
-    config.merge_last = adapter_args.merge_last
+    # config.train_task_adapters = petl_args.train_task_adapters
+    # config.train_side_ladder = petl_args.train_side_ladder
+    # config.prefix_tuning = petl_args.prefix_tuning
+    # config.lambda_distill = petl_args.lambda_distill
+    # config.lambda_label = petl_args.lambda_label
+    # config.lambda_kd_ir = petl_args.lambda_kd_ir
+    # config.gate_T = petl_args.gate_T
+    # config.use_gate = petl_args.use_gate
+    # config.gate_alpha = petl_args.gate_alpha
+    # training_args.use_gate = petl_args.use_gate
+    # config.add_residual_after = petl_args.add_residual_after
+    # config.encoder_side_layers = petl_args.encoder_side_layers
+    # config.decoder_side_layers = petl_args.decoder_side_layers
+    # config.side_downsample_pool = petl_args.side_downsample_pool
+    # config.add_bias_sampling = petl_args.add_bias_sampling
+    # config.merge_last = petl_args.merge_last
 
 
-    if adapter_args.train_lora:
-        from seq2seq.lora import LoraConfig
-        lora_config = LoraConfig()
-        lora_config.lora_dim = adapter_args.lora_dim
-        lora_config.tasks = [data_args.task_name]
-    else:
-        lora_config = None
+    # if petl_args.train_lora:
+    #     from seq2seq.lora import LoraConfig
+    #     lora_config = LoraConfig()
+    #     lora_config.lora_dim = petl_args.lora_dim
+    #     lora_config.tasks = [data_args.task_name]
+    # else:
+    #     lora_config = None
 
-    adapter_config = get_adapter_config(adapter_args, data_args, training_args, config)
     tokenizer = AutoTokenizer.from_pretrained(
         model_args.tokenizer_name if model_args.tokenizer_name else model_args.model_name_or_path,
         cache_dir=model_args.cache_dir,
@@ -415,24 +250,28 @@ def main():
                 [(l if l != tokenizer.pad_token_id else -100) for l in label] for label in labels["input_ids"]
             ]
         model_inputs["labels"] = labels["input_ids"]
-        model_inputs["extra_fields"] = examples['extra_fields']
+        # model_inputs["extra_fields"] = examples['extra_fields']
+
         return model_inputs
 
     def preprocess_function_t5_mlm(examples, *args, **kwargs):
         # just extract the source, and the data collator will do the rest of work
-        return {"source": examples["source"], "extra_fields": examples['extra_fields']}
+        # return {"source": examples["source"], "extra_fields": examples['extra_fields']}
 
-    preprocess_function_chosen = preprocess_function_t5_mlm if adapter_args.train_t5_mlm else preprocess_function
+        return {"source": examples["source"]}
 
-    column_names = ['source', 'target', 'extra_fields']
+    preprocess_function_chosen = preprocess_function_t5_mlm if petl_args.train_t5_mlm else preprocess_function
+
+    # column_names = ['source', 'target', 'extra_fields']
+    column_names = ['source', 'target']
     performance_metrics = {}
+
     if training_args.do_train:
-        train_datasets = [AutoTask.get(dataset_name,
-                                       dataset_config_name,
-                                       seed=data_args.data_seed).get(
+        train_datasets = [AutoTask.get(dataset_name, dataset_config_name,
+            seed=training_args.data_seed).get(
             split="train", 
             split_validation_test=training_args.split_validation_test,
-            add_prefix=False if adapter_args.train_task_adapters else True,
+            add_prefix=training_args.add_prefix_to_inputs,
             n_obs=data_args.max_train_samples)
             for dataset_name, dataset_config_name\
             in zip(data_args.dataset_name, data_args.dataset_config_name)]
@@ -451,10 +290,10 @@ def main():
    
     if training_args.do_eval:
         eval_datasets = {eval_dataset: AutoTask.get(eval_dataset, eval_dataset_config,
-            seed=data_args.data_seed).get(
-            split="validation", 
+            seed=training_args.data_seed).get(
+            split="validation" if not data_args.use_train_as_validation else "train", 
             split_validation_test=training_args.split_validation_test,
-            add_prefix=False if adapter_args.train_task_adapters else True,
+            add_prefix=training_args.add_prefix_to_inputs,
             n_obs=data_args.max_val_samples)
             for eval_dataset, eval_dataset_config in zip(data_args.eval_dataset_name, data_args.eval_dataset_config_name)}
         max_target_lengths = [AutoTask.get(dataset_name, dataset_config_name).get_max_target_length( \
@@ -471,10 +310,10 @@ def main():
 
     if training_args.do_test:
         test_datasets = {test_dataset: AutoTask.get(test_dataset, test_dataset_config,
-            seed=data_args.data_seed).get(
+            seed=training_args.data_seed).get(
             split="test", 
             split_validation_test=training_args.split_validation_test,
-            add_prefix=False if adapter_args.train_task_adapters else True,
+            add_prefix=training_args.add_prefix_to_inputs,
             n_obs=data_args.max_test_samples)
             for test_dataset, test_dataset_config in zip(data_args.test_dataset_name, data_args.test_dataset_config_name)}
         max_target_lengths = [AutoTask.get(dataset_name, dataset_config_name).get_max_target_length( \
@@ -491,11 +330,12 @@ def main():
 
     # Data collator
     label_pad_token_id = -100 if data_args.ignore_pad_token_for_loss else tokenizer.pad_token_id
-    if adapter_args.train_t5_mlm:
+
+    if petl_args.train_t5_mlm:
         training_args.remove_unused_columns = False # avoid removing example["source"] when feeding examples to data collator
         data_collator = DataCollatorForT5MLM(
             tokenizer=tokenizer,
-            noise_density=adapter_args.mlm_ratio,
+            noise_density=petl_args.mlm_ratio,
             mean_noise_span_length=3,
             input_length=data_args.max_source_length,
             target_length=data_args.max_target_length,
@@ -505,117 +345,53 @@ def main():
     elif data_args.pad_to_max_length:
         data_collator = default_data_collator
     else:
-        data_collator = TaskDataCollatorForSeq2Seq(
+        data_collator = DataCollatorForSeq2Seq(
             tokenizer,
             label_pad_token_id=label_pad_token_id,
             pad_to_multiple_of=8 if training_args.fp16 else None,
         )
 
-    if adapter_args.train_t5_mlm:
+    if petl_args.train_t5_mlm:
         from seq2seq.metrics import metrics
         # just to avoid error happens, whatever metric is used doesn't effect the selected models in distillation
-        eval_metrics = [AutoTask.get(dataset_name, dataset_config_name).metric if dataset_name in ["cola", "stsb"] else [metrics.accuracy] \
+        metric = [AutoTask.get(dataset_name, dataset_config_name).load_metric() if dataset_name in ["cola", "stsb"] else evaluate.load("accuracy") \
             for dataset_name, dataset_config_name in zip(data_args.dataset_name, data_args.dataset_config_name)][0]
     else:
         # Metric, we assume we have only one training task.
-        eval_metrics = [AutoTask.get(dataset_name, dataset_config_name).metric\
+        metric = [AutoTask.get(dataset_name, dataset_config_name).load_metric() \
             for dataset_name, dataset_config_name in zip(data_args.dataset_name, data_args.dataset_config_name)][0]
 
-    # Extracts the extra information needed to evaluate on each dataset.
-    # These information are only used in the compute_metrics.
-    # We will assume that the test/eval dataloader does not change the order of 
-    # the data.
+    # # Extracts the extra information needed to evaluate on each dataset.
+    # # These information are only used in the compute_metrics.
+    # # We will assume that the test/eval dataloader does not change the order of 
+    # # the data.
 
-    if training_args.do_train:
-        data_info = {"eval": eval_datasets[data_args.eval_dataset_name[0]]['extra_fields'],
-                    "test": test_datasets[data_args.test_dataset_name[0]]['extra_fields'], 
-                    "train": train_dataset['extra_fields']}
-    else:
-        data_info = {"eval": eval_datasets[data_args.eval_dataset_name[0]]['extra_fields'],
-                    "test": test_datasets[data_args.test_dataset_name[0]]['extra_fields']}
+    # if training_args.do_train:
+    #     data_info = {"eval": eval_datasets[data_args.eval_dataset_name[0]]['extra_fields'],
+    #                  "test": test_datasets[data_args.test_dataset_name[0]]['extra_fields'], 
+    #                  "train": train_dataset['extra_fields']}
+    # else:
+    #     data_info = {"eval": eval_datasets[data_args.eval_dataset_name[0]]['extra_fields'],
+    #                  "test": test_datasets[data_args.test_dataset_name[0]]['extra_fields']}
 
     def compute_metrics(eval_preds):
-        preds, labels, data_info = eval_preds
+        preds, labels = eval_preds
         post_processor = AutoPostProcessor.get(data_args.dataset_name[0], tokenizer,
                                                data_args.ignore_pad_token_for_loss)
-        decoded_preds, decoded_labels = post_processor.process(preds, labels, data_info)
-        result = {}
-        for metric in eval_metrics:
-            result.update(metric(decoded_preds, decoded_labels))
+        decoded_preds, decoded_labels = post_processor.process(preds, labels)
+    
+
+        # result = {}
+        # for metric in eval_metrics:
+        #     result.update(metric(decoded_preds, decoded_labels))
+
+        # return result
+
+        result = metric.compute(predictions=decoded_preds, references=decoded_labels)
+        result["combined_score"] = np.mean(list(result.values())).item()
+
         return result
-
-    # we create a stand-alone model (without a side transformer) for computing fisher
-    # so we call it before creating the model with side transformer to avoid holding two models 
-    # in the save time (to save memory).
-    if "fisher" in adapter_args.load_side_pretrained_weights:
-        from transformers.models.t5.modeling_t5 import T5ForConditionalGeneration
-        model = T5ForConditionalGeneration.from_pretrained(model_args.model_name_or_path)
-        model.resize_token_embeddings(len(tokenizer))
-
-        from seq2seq.pruning.fisher import compute_fisher
-        from transformers import DataCollatorForSeq2Seq
-
-        d_collator_for_fish = DataCollatorForSeq2Seq(
-            tokenizer,
-            label_pad_token_id=label_pad_token_id,
-            pad_to_multiple_of=8 if training_args.fp16 else None,
-        )
-        importance_measure = compute_fisher(model, train_dataset, d_collator_for_fish, num_samples=adapter_args.samples_for_fisher)
-
-        if adapter_args.use_bottleneck:
-            from seq2seq.pruning.pruning_methods import pruning_bottleneck
-            method = pruning_bottleneck
-        if adapter_args.create_side_lm:
-            from seq2seq.pruning.pruning_methods import pruning_with_residual
-            method = pruning_with_residual
-        else:
-            from seq2seq.pruning.pruning_methods import pruning_v2, pruning_v3, pruning_v4, pruning_v5
-            pruning_version = adapter_args.load_side_pretrained_weights.split("-")[-1]
-            method = eval(f"pruning_{pruning_version}")
-
-        print(method.__name__)
-
-        pruned_state_dict = method(model, adapter_args.task_reduction_factor, importance_measure=importance_measure)
-
-    if "t5-base" in adapter_args.load_side_pretrained_weights:
-        from transformers.models.t5.modeling_t5 import T5ForConditionalGeneration
-        model = T5ForConditionalGeneration.from_pretrained(model_args.model_name_or_path)
-        model.resize_token_embeddings(len(tokenizer))
-
-        if adapter_args.use_bottleneck:
-            from seq2seq.pruning.pruning_methods import pruning_bottleneck
-            method = pruning_bottleneck
-        if adapter_args.create_side_lm:
-            from seq2seq.pruning.pruning_methods import pruning_with_residual
-            method = pruning_with_residual
-        else:
-            from seq2seq.pruning.pruning_methods import pruning_v2, pruning_v3, pruning_v4, pruning_v5
-            pruning_version = adapter_args.load_side_pretrained_weights.split("-")[-1]
-            method = eval(f"pruning_{pruning_version}")
-
-        print(method.__name__)
-
-        pruned_state_dict = method(model, adapter_args.task_reduction_factor)
-
-    # Initialize the model 
-    if adapter_args.train_side_transformer:
-        if adapter_args.use_bottleneck:
-            from seq2seq.third_party.models.t5.modeling_bottleneck_t5 import T5ForConditionalGeneration
-        elif adapter_args.use_updown:
-            from seq2seq.third_party.models.t5.modeling_side_updown_t5 import T5ForConditionalGeneration
-        elif adapter_args.create_side_lm:
-            from seq2seq.third_party.models.t5.modeling_side_logit_t5 import T5ForConditionalGeneration
-        else:
-            from seq2seq.third_party.models.t5.modeling_side_t5 import T5ForConditionalGeneration
-    elif adapter_args.lit_distillation:
-        from seq2seq.third_party.models.t5.modeling_lit import T5ForConditionalGeneration
-    elif adapter_args.train_side_cross_transformer:
-        from seq2seq.third_party.models.t5.modeling_cross_side_t5 import T5ForConditionalGeneration
-    elif adapter_args.train_deepsidenet_transformer:
-        from seq2seq.third_party.models.t5.modeling_deepsidenet_t5 import T5ForConditionalGeneration
-    else:
-        from seq2seq.third_party.models.t5.modeling_t5 import T5ForConditionalGeneration
-
+        
     model = T5ForConditionalGeneration.from_pretrained(
         model_args.model_name_or_path,
         from_tf=bool(".ckpt" in model_args.model_name_or_path),
@@ -623,196 +399,25 @@ def main():
         cache_dir=model_args.cache_dir,
         revision=model_args.model_revision,
         use_auth_token=True if model_args.use_auth_token else None,
-        adapter_config=adapter_config,
-        lora_config=lora_config
     )
 
     # model.resize_token_embeddings(len(tokenizer))
 
-    resize_token_embeddings(adapter_args, model, tokenizer)
-    
-    # Intialize side transformer
-    if adapter_args.load_side_pretrained_weights == "t5-base":
-        state_dict = model.state_dict()
-        for n, p in model.named_parameters():
-            if "side_block" in n:
-                infer_n = n.split(".")
-                infer_n[1] = "block"
-                infer_n = ".".join(infer_n)
+    resize_token_embeddings(petl_args, model, tokenizer)
 
-                print(n, infer_n)
+    model = modify_model_with_petl(model, petl_args)
 
-                state = state_dict[infer_n]
+    if model_args.weight_to_load is not None:
+        weight_to_load = torch.load(model_args.weight_to_load, map_device="cpu")
+        model.load_state_dict(weight_to_load)
 
-                p.data.copy_(state.data)
-
-            if "final_side_layer_norm" in n:
-                infer_n = n.split("_")
-                infer_n.pop(1)
-                infer_n = "_".join(infer_n)
-
-                print(n, infer_n)
-
-                state = state_dict[infer_n]
-
-                p.data.copy_(state.data)
-
-            if "side_lm_head" in n:
-                infer_n = n.split(".")
-                infer_n[1] = "lm_head"
-                infer_n = ".".join(infer_n)
-
-                print(n, infer_n)
-
-                state = pruned_state_dict[infer_n]
-
-                p.data.copy_(state)
-
-            if "side_shared" in n:
-                infer_n = n.split(".")
-                infer_n[0] = "shared"
-                infer_n = ".".join(infer_n)
-
-                print(n, infer_n)
-
-                state = pruned_state_dict[infer_n]
-
-                p.data.copy_(state)
-
-    elif "fisher" in adapter_args.load_side_pretrained_weights or "t5-base" in adapter_args.load_side_pretrained_weights:
-        self_model_state_dict = model.state_dict()
-        for n, p in model.named_parameters():
-            if "side_block" in n:
-                if "relative_attention_bias" in n:
-                    # only in the first layer of the pre-trained model
-                    infer_n = n.split(".")
-                    infer_n[1] = "block"
-                    infer_n[2] = "0"
-                    infer_n = ".".join(infer_n)
-
-                    # the size is wrong in pre-trained weights, so load from self model
-                    state = self_model_state_dict[infer_n]
-                    p.data.copy_(state)
-
-                elif adapter_args.train_side_cross_transformer and "encoder" in n and any([_t in n for _t in ["1.EncDecAttention", "1.layer_norm", "2.layer_norm", "2.DenseReluDense"]]):
-                    # initialize cross-attention
-                    infer_n = n.split(".")
-                    if "1.EncDecAttention" in n:
-                        infer_n[1] = "block"
-                        infer_n[4] = "0"
-                        infer_n[5] = "SelfAttention"
-
-                    if "1.layer_norm" in n:
-                        infer_n[1] = "block"
-                        infer_n[4] = "0"
-
-                    if "2.DenseReluDense" in n:
-                        infer_n[1] = "block"
-                        infer_n[4] = "1"
-
-                    if "2.layer_norm" in n:
-                        infer_n[1] = "block"
-                        infer_n[4] = "1"
-
-                    infer_n = ".".join(infer_n)
-                    print(n, infer_n)
-
-                    state = pruned_state_dict[infer_n]
-
-                    p.data.copy_(state.data)
-
-                elif adapter_args.train_side_cross_transformer and "decoder" in n and any([_t in n for _t in ["1.EncDecAttention", "1.layer_norm", "2.EncDecAttention", "2.layer_norm", "3.layer_norm", "3.DenseReluDense"]]):
-                    # initialize cross-attention
-                    infer_n = n.split(".")
-                    if "1.EncDecAttention" in n:
-                        # side cross attn
-                        infer_n[1] = "block"
-                        infer_n[4] = "0"
-                        infer_n[5] = "SelfAttention"
-
-                    if "1.layer_norm" in n:
-                        infer_n[1] = "block"
-                        infer_n[4] = "0"
-
-                    if "2.EncDecAttention" in n:
-                        # cross attn
-                        infer_n[1] = "block"
-                        infer_n[4] = "1"
-
-                    if "2.layer_norm" in n:
-                        infer_n[1] = "block"
-                        infer_n[4] = "1"
-
-                    if "3.DenseReluDense" in n:
-                        infer_n[1] = "block"
-                        infer_n[4] = "2"
-
-                    if "3.layer_norm" in n:
-                        infer_n[1] = "block"
-                        infer_n[4] = "2"
-
-                    infer_n = ".".join(infer_n)
-                    print(n, infer_n)
-
-                    state = pruned_state_dict[infer_n]
-
-                    p.data.copy_(state.data)
-        
-                else:
-                    infer_n = n.split(".")
-                    infer_n[1] = "block"
-                    infer_n = ".".join(infer_n)
-
-                    state = pruned_state_dict[infer_n]
-
-                    p.data.copy_(state)
-
-                print(n, infer_n)
-                
-            if "final_side_layer_norm" in n:
-                infer_n = n.split("_")
-                infer_n.pop(1)
-                infer_n = "_".join(infer_n)
-
-                print(n, infer_n)
-
-                if adapter_args.use_updown:
-                    # the size is wrong in pre-trained weights, so load from self model
-                    state = self_model_state_dict[infer_n]
-                else:
-                    state = pruned_state_dict[infer_n]
-
-                p.data.copy_(state)
-
-            if "side_lm_head" in n:
-                infer_n = n.split(".")
-                infer_n[1] = "lm_head"
-                infer_n = ".".join(infer_n)
-
-                print(n, infer_n)
-
-                state = pruned_state_dict[infer_n]
-
-                p.data.copy_(state)
-
-            if "side_shared" in n:
-                infer_n = n.split(".")
-                infer_n[0] = "shared"
-                infer_n = ".".join(infer_n)
-
-                print(n, infer_n)
-
-                state = pruned_state_dict[infer_n]
-
-                p.data.copy_(state)
-
-    elif adapter_args.load_side_pretrained_weights == "":
-        # don't load pretrained weights for the side network
-        pass
-    else:
-        raise NotImplementedError
-
-    model, total_trainable_params_percent = modify_model_after_init(model, training_args, adapter_args)
+    # determine trainable parameters
+    for p_name, param in model.named_parameters():
+        if re.fullmatch(petl_args.trainable_param_names, p_name):
+            param.requires_grad = True
+            print(p_name)
+        else:
+            param.requires_grad = False
 
     # Initialize our Trainer
     trainer = Seq2SeqTrainer(
@@ -820,16 +425,38 @@ def main():
         args=training_args,
         train_dataset=train_dataset if training_args.do_train else None,
         eval_dataset=list(eval_datasets.values())[0] if training_args.do_eval else None,
-        data_info = data_info,
+        # data_info=data_info,
         tokenizer=tokenizer,
         data_collator=data_collator,
         compute_metrics=compute_metrics if training_args.predict_with_generate else None,
-        evaluation_metrics = TASK_TO_METRICS[data_args.dataset_name[0]]
+        # evaluation_metrics = TASK_TO_METRICS[data_args.dataset_name[0]]
     )
     # Saves training config. 
     if trainer.is_world_process_zero():
-       os.makedirs(training_args.output_dir, exist_ok=True)
-       save_training_config(sys.argv[1], training_args.output_dir)
+        os.makedirs(training_args.output_dir, exist_ok=True)
+
+        config_to_save = {
+            **vars(petl_args), 
+            **vars(training_args), 
+            **vars(model_args), 
+            **vars(data_args),
+        }
+
+        def is_serializable(v):
+            if isinstance(v, (str, int, float, bool, list, dict, set, type(None))):
+                return True
+            else:
+                return False
+
+        config_to_save = {
+            k: v for k, v in config_to_save.items() if is_serializable(v)
+        }
+
+        save_training_config(config_to_save, training_args.output_dir)
+
+    if training_args.print_num_parameters:
+        total_trainable_params_percent = num_parameters(model, petl_args)
+        trainer.save_metrics("updated_params", {"updated_params": total_trainable_params_percent})
 
     # Training
     if training_args.do_train:
@@ -871,11 +498,10 @@ def main():
             "GB"
         )
         performance_metrics.update({"peak_memory": peak_memory})
+
     if training_args.compute_memory or training_args.compute_time:
         print(performance_metrics)
         trainer.save_metrics("performance", performance_metrics)
-
-    trainer.save_metrics("updated_params", {"updated_params": total_trainable_params_percent})
     
     # Evaluation
     results = {}
@@ -883,7 +509,7 @@ def main():
         logger.info("*** Evaluate ***")
         for task, eval_dataset in eval_datasets.items():
             metrics = trainer.evaluate(eval_dataset=eval_dataset,
-               max_length=data_args.val_max_target_length, num_beams=data_args.num_beams,
+               max_length=data_args.val_max_target_length, num_beams=training_args.generation_num_beams,
             )
             trainer.log_metrics("eval", metrics)
             trainer.save_metrics("eval", metrics)
@@ -902,7 +528,7 @@ def main():
         logger.info("*** Test ***")
         for task, test_dataset in test_datasets.items():
             metrics = trainer.evaluate(eval_dataset=test_dataset,
-              max_length=data_args.test_max_target_length, num_beams=data_args.num_beams,
+              max_length=data_args.test_max_target_length, num_beams=training_args.generation_num_beams,
               metric_key_prefix="test"
             )
             trainer.log_metrics("test", metrics)

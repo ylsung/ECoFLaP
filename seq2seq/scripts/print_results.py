@@ -3,21 +3,23 @@ import json
 import sys
 import numpy as np
 
-tasks = ["cola", "mrpc", "qnli", "rte", "sst2", "mnli", "qqp", "stsb"]
+tasks = ["cola", "sst2", "mrpc", "qqp", "mnli", "qnli", "rte", "stsb"]
 
 file_prefix = sys.argv[1]
 
 print(file_prefix)
 
+seeds = [0]
+
 for task in tasks:
     metrics = []
-    for seed in [0]:
+    for seed in seeds:
         file_name = f"{file_prefix}{task}@{seed}.json"
 
         data = json.load(open(file_name, "r"))
 
         # print(data.keys())
-        metric = data["test_average_metrics"]
+        metric = data["test_combined_score"] * 100
 
         metrics.append(metric)
 
@@ -25,7 +27,7 @@ for task in tasks:
 
 avg_metrics = []
 
-for seed in [0, 1, 2]:
+for seed in seeds:
     metrics = []
     for task in tasks:
         file_name = f"{file_prefix}{task}@{seed}.json"
@@ -33,7 +35,7 @@ for seed in [0, 1, 2]:
         data = json.load(open(file_name, "r"))
 
         # print(data.keys())
-        metric = data["test_average_metrics"]
+        metric = data["test_combined_score"] * 100
 
         metrics.append(metric)
 

@@ -29,21 +29,22 @@ def setup_package():
           'Programming Language :: Python :: 3.7.10',
       ],
       keywords='text nlp machinelearning',
-      ext_modules=[
-        CUDAExtension('seq2seq.projections.fwh_cuda',
-            sources=[
-            'seq2seq/projections/fwh_cuda/fwh_cpp.cpp',
-            'seq2seq/projections/fwh_cuda/fwh_cu.cu',
-            ]
-        )
-      ],
-      cmdclass={"build_ext": BuildExtension},
+      # ext_modules=[
+      #   CUDAExtension('seq2seq.projections.fwh_cuda',
+      #       sources=[
+      #       'seq2seq/projections/fwh_cuda/fwh_cpp.cpp',
+      #       'seq2seq/projections/fwh_cuda/fwh_cu.cu',
+      #       ]
+      #   )
+      # ],
+      # cmdclass={"build_ext": BuildExtension},
       install_requires=[
-        'datasets==1.6.2',
+        'datasets',
+        'evaluate',
         'scikit-learn==0.24.2',
-        'tensorboard==2.5.0',
-        'matplotlib==3.4.2',
-        'transformers==4.6.0'
+        'tensorboard',
+        'matplotlib',
+        'transformers==4.25.1'
       ],
   )
 
