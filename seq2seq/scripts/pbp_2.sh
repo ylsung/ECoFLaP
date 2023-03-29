@@ -12,22 +12,22 @@ fi
 
 source scripts/env.sh
 
-file_name=pbp
+file_name=pbp_hard_full_finetuning
 
-pbp_reduction_factor=1
+pbp_reduction_factor=8
 
 enc_num_tokens=10
 dec_num_tokens=10
 prompts_expand_after=True
-lr=1e-2
+lr=3e-3
 
-log_file_name=${file_name}_r${pbp_reduction_factor}_init_and_freeze_sampling_and_prompt_e${enc_num_tokens}_d${dec_num_tokens}
+log_file_name=${file_name}_r${pbp_reduction_factor}_e${enc_num_tokens}_d${dec_num_tokens}
 output_dir=${home_path}/data/outputs/${file_name}_2
 
 for seed in 0
 do
 
-for task in "cola"
+for task in "cola" "mrpc" "qnli" "sst2" "rte" "mnli" "qqp" "stsb"
 
 do
 
@@ -42,7 +42,6 @@ do
         --enc_num_tokens ${enc_num_tokens} \
         --dec_num_tokens ${dec_num_tokens} \
         --prompts_expand_after ${prompts_expand_after} \
-        --trainable_param_names ".*prompts.*|.*embed_to_kv.*|.*side.*" \
         --learning_rate ${lr} \
         --output_dir ${output_dir}
 

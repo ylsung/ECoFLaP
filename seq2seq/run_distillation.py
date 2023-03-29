@@ -19,7 +19,6 @@ Fine-tuning the library models for sequence to sequence.
 import functools
 import logging
 import torch 
-import random
 import re
 import os
 os.environ['MKL_THREADING_LAYER'] = 'GNU' 
@@ -49,15 +48,18 @@ from seq2seq.data import TaskDataCollatorForSeq2Seq, DataCollatorForT5MLM
 from training_args import TrainingArguments, ModelArguments, DataTrainingArguments, PETLModelArguments
 from seq2seq.utils import num_parameters, save_training_config
 from dataclasses import dataclass, field
-from third_party.trainers.seq2seq_trainer import CustomOptSeq2SeqTrainer, GeneralSeq2SeqTrainer
+from third_party.trainers.seq2seq_trainer import CustomOptSeq2SeqTrainer, _save
 from transformers import Seq2SeqTrainer
 from transformers import DataCollatorForSeq2Seq
 from transformers import T5Config, T5ForConditionalGeneration
 from seq2seq.data import AutoPostProcessor
 
-
 from seq2seq.methods import modify_model_with_petl
 from seq2seq.utils.utils import parse_args
+from copy import deepcopy
+
+from seq2seq.methods.distillation.modify_model_with_distillation import t5_modify_with_distillation
+from third_party.modeling_utils import save_pretrained
 
 
 logger = logging.getLogger(__name__)
@@ -88,31 +90,6 @@ TASK_TO_METRICS = {"mrpc": ["accuracy", "f1"],
                   "superglue-wsc.fixed": ["accuracy"],
                   "superglue-record": ["f1", "em"]
          }
-
-
-def resize_token_embeddings(petl_args, model, tokenizer):
-    if petl_args.create_side_lm:
-        tmp_get_input_embeddings = model.get_input_embeddings
-        tmp_set_input_embeddings = model.set_input_embeddings
-        tmp_set_output_embeddings = model.set_output_embeddings
-        tmp_get_output_embeddings = model.get_output_embeddings
-
-        # resize side network's modules
-        model.get_input_embeddings = model.get_side_input_embeddings
-        model.set_input_embeddings = model.set_side_input_embeddings
-        model.set_output_embeddings = model.set_side_output_embeddings
-        model.get_output_embeddings = model.get_side_output_embeddings
-
-        model.resize_token_embeddings(len(tokenizer))
-
-        model.get_input_embeddings = tmp_get_input_embeddings
-        model.set_input_embeddings = tmp_set_input_embeddings
-        model.set_output_embeddings = tmp_set_output_embeddings
-        model.get_output_embeddings = tmp_get_output_embeddings
-
-        model.resize_token_embeddings(len(tokenizer))
-    else:
-        model.resize_token_embeddings(len(tokenizer))
 
 
 def main():
@@ -226,74 +203,40 @@ def main():
                 [(l if l != tokenizer.pad_token_id else -100) for l in label] for label in labels["input_ids"]
             ]
         model_inputs["labels"] = labels["input_ids"]
-        model_inputs["extra_fields"] = examples['extra_fields']
+        # model_inputs["extra_fields"] = examples['extra_fields']
 
         return model_inputs
 
-    # Validation preprocessing
-    def preprocess_validation_function_for_qa(examples, max_target_length):
-        model_inputs = tokenizer(
-            examples['source'],
-            max_length=data_args.max_source_length,
-            padding=padding,
-            truncation=True,
-            return_overflowing_tokens=True,
-            return_offsets_mapping=True,
-        )
-        # Tokenize targets with the `text_target` keyword argument
-        labels = tokenizer(text_target=examples['target'], max_length=max_target_length, padding=padding, truncation=True)
+    def preprocess_function_t5_mlm(examples, *args, **kwargs):
+        # just extract the source, and the data collator will do the rest of work
+        # return {"source": examples["source"], "extra_fields": examples['extra_fields']}
 
-        # If we are padding here, replace all tokenizer.pad_token_id in the labels by -100 when we want to ignore
-        # padding in the loss.
-        if padding == "max_length" and data_args.ignore_pad_token_for_loss:
-            labels["input_ids"] = [
-                [(l if l != tokenizer.pad_token_id else -100) for l in label] for label in labels["input_ids"]
-            ]
+        return {"source": examples["source"]}
 
-        # Since one example might give us several features if it has a long context, we need a map from a feature to
-        # its corresponding example. This key gives us just that.
-        sample_mapping = model_inputs.pop("overflow_to_sample_mapping")
+    preprocess_function_chosen = preprocess_function_t5_mlm
 
-        # For evaluation, we will need to convert our predictions to substrings of the context, so we keep the
-        # corresponding example_id and we will store the offset mappings.
-        model_inputs["example_id"] = []
-        # Augment the overflowing tokens to the labels
-        labels_out = []
-
-        for i in range(len(model_inputs["input_ids"])):
-            # One example can give several spans, this is the index of the example containing this span of text.
-            sample_index = sample_mapping[i]
-            model_inputs["example_id"].append(examples["id"][sample_index])
-            labels_out.append(labels["input_ids"][sample_index])
-
-        model_inputs["labels"] = labels_out
-        return model_inputs
-
-    preprocess_validation_function_chosen = preprocess_function
-
-    column_names = ['source', 'target', 'extra_fields']
-    # column_names = ['source', 'target']
+    # column_names = ['source', 'target', 'extra_fields']
+    column_names = ['source', 'target']
     performance_metrics = {}
 
     if training_args.do_train:
         train_datasets = [AutoTask.get(dataset_name, dataset_config_name,
             seed=training_args.data_seed).get(
             split="train", 
-            split_validation_test=training_args.split_validation_test,
-            add_prefix=training_args.add_prefix_to_inputs,
+            split_validation_test=False,
+            add_prefix=False,
             n_obs=data_args.max_train_samples)
             for dataset_name, dataset_config_name\
             in zip(data_args.dataset_name, data_args.dataset_config_name)]
-
         max_target_lengths = [AutoTask.get(dataset_name, dataset_config_name).get_max_target_length(\
             tokenizer=tokenizer, default_max_length=data_args.max_target_length)\
             for dataset_name, dataset_config_name in zip(data_args.dataset_name, data_args.dataset_config_name)]
         for i, train_dataset in enumerate(train_datasets):
             train_datasets[i] = train_datasets[i].map(
-                functools.partial(preprocess_function, max_target_length=max_target_lengths[i]),
+                functools.partial(preprocess_function_chosen, max_target_length=max_target_lengths[i]),
                 batched=True,
                 num_proc=data_args.preprocessing_num_workers,
-                remove_columns=column_names,
+                remove_columns=column_names, # if train_dataset != "superglue-record" else column_names+["answers"],
                 load_from_cache_file=not data_args.overwrite_cache,
             )
         train_dataset = concatenate_datasets(train_datasets)
@@ -301,9 +244,9 @@ def main():
     if training_args.do_eval:
         eval_datasets = {eval_dataset: AutoTask.get(eval_dataset, eval_dataset_config,
             seed=training_args.data_seed).get(
-            split="validation" if not data_args.use_train_as_validation else "train", 
-            split_validation_test=training_args.split_validation_test,
-            add_prefix=training_args.add_prefix_to_inputs,
+            split="validation" if eval_dataset == "c4" else "test", 
+            split_validation_test=False,
+            add_prefix=False,
             n_obs=data_args.max_val_samples)
             for eval_dataset, eval_dataset_config in zip(data_args.eval_dataset_name, data_args.eval_dataset_config_name)}
         max_target_lengths = [AutoTask.get(dataset_name, dataset_config_name).get_max_target_length( \
@@ -311,72 +254,50 @@ def main():
             for dataset_name, dataset_config_name in zip(data_args.eval_dataset_name, data_args.eval_dataset_config_name)]
         for k, name in enumerate(eval_datasets):
             eval_datasets[name] = eval_datasets[name].map(
-                    functools.partial(preprocess_validation_function_chosen, max_target_length=max_target_lengths[k]),
+                    functools.partial(preprocess_function_chosen, max_target_length=max_target_lengths[k]),
                     batched=True,
                     num_proc=data_args.preprocessing_num_workers,
-                    remove_columns=column_names,
+                    remove_columns=column_names, # if name != "superglue-record" else column_names+["answers"],
                     load_from_cache_file=not data_args.overwrite_cache,
             )
-
-            # print(len(eval_datasets[name]))
-
-    if training_args.do_test:
-        test_datasets = {test_dataset: AutoTask.get(test_dataset, test_dataset_config,
-            seed=training_args.data_seed).get(
-            split="test",
-            split_validation_test=training_args.split_validation_test,
-            add_prefix=training_args.add_prefix_to_inputs,
-            n_obs=data_args.max_test_samples)
-            for test_dataset, test_dataset_config in zip(data_args.test_dataset_name, data_args.test_dataset_config_name)}
-        max_target_lengths = [AutoTask.get(dataset_name, dataset_config_name).get_max_target_length( \
-            tokenizer=tokenizer, default_max_length=data_args.max_target_length) \
-            for dataset_name, dataset_config_name in zip(data_args.test_dataset_name, data_args.test_dataset_config_name)]
-        for k, name in enumerate(test_datasets):
-            test_datasets[name] = test_datasets[name].map(
-                    functools.partial(preprocess_validation_function_chosen, max_target_length=max_target_lengths[k]),
-                    batched=True,
-                    num_proc=data_args.preprocessing_num_workers,
-                    remove_columns=column_names,
-                    load_from_cache_file=not data_args.overwrite_cache,
-            )
-
-            # print(len(test_datasets[name]))
-
 
     # Data collator
     label_pad_token_id = -100 if data_args.ignore_pad_token_for_loss else tokenizer.pad_token_id
 
-    if data_args.pad_to_max_length:
-        data_collator = default_data_collator
-    else:
-        data_collator = DataCollatorForSeq2Seq(
-            tokenizer,
-            label_pad_token_id=label_pad_token_id,
-            pad_to_multiple_of=8 if training_args.fp16 else None,
-        )
+    training_args.remove_unused_columns = False # avoid removing example["source"] when feeding examples to data collator
+    data_collator = DataCollatorForT5MLM(
+        tokenizer=tokenizer,
+        noise_density=petl_args.mlm_ratio,
+        mean_noise_span_length=3,
+        input_length=data_args.max_source_length,
+        target_length=data_args.max_target_length,
+        pad_token_id=config.pad_token_id,
+        decoder_start_token_id=config.decoder_start_token_id,
+    )
 
-    # Metric, we assume we have only one training task.
-    metric = [AutoTask.get(dataset_name, dataset_config_name).load_metric() \
+    from seq2seq.metrics import metrics
+    # just to avoid error happens, whatever metric is used doesn't effect the selected models in distillation
+    metric = [AutoTask.get("mlm", "mlm").load_metric() \
         for dataset_name, dataset_config_name in zip(data_args.dataset_name, data_args.dataset_config_name)][0]
 
-    # Extracts the extra information needed to evaluate on each dataset.
-    # These information are only used in the compute_metrics.
-    # We will assume that the test/eval dataloader does not change the order of 
-    # the data.
+    # # Extracts the extra information needed to evaluate on each dataset.
+    # # These information are only used in the compute_metrics.
+    # # We will assume that the test/eval dataloader does not change the order of 
+    # # the data.
 
-    if training_args.do_train:
-        data_info = {"eval": eval_datasets[data_args.eval_dataset_name[0]]['extra_fields'],
-                     "test": test_datasets[data_args.test_dataset_name[0]]['extra_fields'], 
-                     "train": train_dataset['extra_fields']}
-    else:
-        data_info = {"eval": eval_datasets[data_args.eval_dataset_name[0]]['extra_fields'],
-                     "test": test_datasets[data_args.test_dataset_name[0]]['extra_fields']}
+    # if training_args.do_train:
+    #     data_info = {"eval": eval_datasets[data_args.eval_dataset_name[0]]['extra_fields'],
+    #                  "test": test_datasets[data_args.test_dataset_name[0]]['extra_fields'], 
+    #                  "train": train_dataset['extra_fields']}
+    # else:
+    #     data_info = {"eval": eval_datasets[data_args.eval_dataset_name[0]]['extra_fields'],
+    #                  "test": test_datasets[data_args.test_dataset_name[0]]['extra_fields']}
 
-    def compute_metrics(eval_preds, data_info):
+    def compute_metrics(eval_preds):
         preds, labels = eval_preds
-        post_processor = AutoPostProcessor.get(data_args.dataset_name[0], tokenizer,
+        post_processor = AutoPostProcessor.get("mlm", tokenizer,
                                                data_args.ignore_pad_token_for_loss)
-        decoded_preds, decoded_labels = post_processor.process(preds, labels, data_info)
+        decoded_preds, decoded_labels = post_processor.process(preds, labels)
     
 
         # result = {}
@@ -385,21 +306,8 @@ def main():
 
         # return result
 
-        task_name = data_info[0]["task"]
-
         result = metric.compute(predictions=decoded_preds, references=decoded_labels)
-
-        target_metrics = AutoTask.get(task_name, "en", 0).get_desired_metric_names()
-
-        if target_metrics is not None:
-            # Average desired metrics
-            result["combined_score"] = np.mean([result[k] for k in target_metrics])
-        else:
-            # Average all
-            result["combined_score"] = np.mean(list(result.values())).item()
-
-        if np.isnan(result["combined_score"]): # make the score be valid value
-            result["combined_score"] = 0
+        result["combined_score"] = np.mean(list(result.values())).item()
 
         return result
         
@@ -412,49 +320,16 @@ def main():
         use_auth_token=True if model_args.use_auth_token else None,
     )
 
-    # model.resize_token_embeddings(len(tokenizer))
+    teacher = T5ForConditionalGeneration.from_pretrained(
+        petl_args.teacher_model_name,
+    )
 
-    resize_token_embeddings(petl_args, model, tokenizer)
+    model.resize_token_embeddings(len(tokenizer))
+    teacher.resize_token_embeddings(len(tokenizer))
 
-    if "regmean" in petl_args.distillation_init:
+    model = modify_model_with_petl(model, petl_args)
 
-        import inspect
-
-        def remove_unused_columns(model, dataset, description=None):
-            _signature_columns = None
-            if _signature_columns is None:
-                # Inspect model forward signature to keep only the arguments it accepts.
-                signature = inspect.signature(model.forward)
-                _signature_columns = list(signature.parameters.keys())
-                # Labels may be named label or label_ids, the default data collator handles that.
-                _signature_columns += ["label", "label_ids"]
-
-            ignored_columns = list(set(dataset.column_names) - set(_signature_columns))
-
-            columns = [k for k in _signature_columns if k in dataset.column_names]
-
-            return dataset.remove_columns(ignored_columns)
-
-        sampled_num = min(len(train_dataset), 256)
-        indices = random.sample(range(len(train_dataset)), sampled_num)
-        train_dataset_columns_removed = remove_unused_columns(model, train_dataset, description="training")
-
-        sampled_dataset = torch.utils.data.Subset(train_dataset_columns_removed, indices)
-
-        
-        # print(len(train_dataset), type(train_dataset))
-        # print(len(sampled_dataset), type(sampled_dataset))
-        sampled_loader = torch.utils.data.DataLoader(
-            sampled_dataset,
-            batch_size=128,
-            collate_fn=data_collator,
-            num_workers=8,
-            shuffle=False,
-        )
-    else:
-        sampled_loader = None
-
-    model = modify_model_with_petl(model, petl_args, sampled_loader=sampled_loader)
+    model = t5_modify_with_distillation(model, teacher, petl_args)
 
     if model_args.weight_to_load is not None:
         weight_to_load = torch.load(model_args.weight_to_load, map_location="cpu")
@@ -462,7 +337,7 @@ def main():
 
     # determine trainable parameters
     for p_name, param in model.named_parameters():
-        if re.fullmatch(petl_args.trainable_param_names, p_name):
+        if re.fullmatch(petl_args.trainable_param_names, p_name) and "teacher" not in p_name:
             param.requires_grad = True
             print(p_name)
         else:
@@ -471,7 +346,7 @@ def main():
     if training_args.parameters_with_larger_lr is not None:
         trainer_cls = CustomOptSeq2SeqTrainer
     else:
-        trainer_cls = GeneralSeq2SeqTrainer
+        trainer_cls = Seq2SeqTrainer
 
     # Initialize our Trainer
     trainer = trainer_cls(
@@ -479,16 +354,15 @@ def main():
         args=training_args,
         train_dataset=train_dataset if training_args.do_train else None,
         eval_dataset=list(eval_datasets.values())[0] if training_args.do_eval else None,
-        data_info=data_info,
-        # eval_examples=list(eval_examples.values())[0],
-        # test_examples=list(test_examples.values())[0],
+        # data_info=data_info,
         tokenizer=tokenizer,
         data_collator=data_collator,
         compute_metrics=compute_metrics if training_args.predict_with_generate else None,
-        # post_process_function=AutoPostProcessor.get(list(eval_datasets.keys())[0], tokenizer,
-                                            #    data_args.ignore_pad_token_for_loss).process,
         # evaluation_metrics = TASK_TO_METRICS[data_args.dataset_name[0]]
     )
+    # model.save_pretrained = functools.partial(save_pretrained, model)
+    trainer._save = functools.partial(_save, trainer)
+
     # Saves training config. 
     if trainer.is_world_process_zero():
         os.makedirs(training_args.output_dir, exist_ok=True)
@@ -566,9 +440,6 @@ def main():
     if training_args.do_eval:
         logger.info("*** Evaluate ***")
         for task, eval_dataset in eval_datasets.items():
-
-            # post_process = AutoPostProcessor.get(task, tokenizer, data_args.ignore_pad_token_for_loss).process
-            # eval_example = eval_examples[task]
             metrics = trainer.evaluate(eval_dataset=eval_dataset,
                max_length=data_args.val_max_target_length, num_beams=training_args.generation_num_beams,
             )
@@ -583,31 +454,6 @@ def main():
                 peak_memory,
                 "GB"
             )
-
-    # Test
-    if training_args.do_test:
-        logger.info("*** Test ***")
-        for task, test_dataset in test_datasets.items():
-
-            # post_process = AutoPostProcessor.get(task, tokenizer, data_args.ignore_pad_token_for_loss).process
-            # test_example = test_examples[task]
-        
-            metrics = trainer.evaluate(eval_dataset=test_dataset,
-               max_length=data_args.test_max_target_length, num_beams=training_args.generation_num_beams,
-               metric_key_prefix="test",
-            )
-            
-            trainer.log_metrics("test", metrics)
-            trainer.save_metrics("test", metrics)
-
-    # overwrite
-    if "learnable" in petl_args.distillation_init:
-        from seq2seq.methods.weight_init.learnable_merge import convert_to_normal_save_weights
-        convert_to_normal_save_weights(trainer.model)
-
-        trainer.save_model()  # Saves the tokenizer too for easy upload
-
-    return results
 
 
 def _mp_fn(index):

@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Optional, List
+from typing import Optional, List, Union
 from transformers import Seq2SeqTrainingArguments
 
 
@@ -28,6 +28,8 @@ class TrainingArguments(Seq2SeqTrainingArguments):
                                                                                       "in which parameters are trainable"})
     trainable_decoder_layers: Optional[List[int]] = field(default=None, metadata={"help": "Defines the decoder layers id"
                                                                                       "in which parameters are trainable"})
+    parameters_with_larger_lr: Optional[str] = field(default=None, metadata={"help": "Defines the parameters that need larger lr"})
+    larger_learning_rate_mult: Optional[float] = field(default=10, metadata={"help": "The multiplier for larger lr"})
 
 
 @dataclass
@@ -274,3 +276,27 @@ class PETLModelArguments:
     prompts_expand_after: Optional[bool] = field(default=False, metadata={"help": "Specifies the prefix embedding dimension in decoder."})
     init_from_emb: Optional[bool] = field(default=False, metadata={"help": "Whether to initialize the prompt from the tokenizer's embeddings."})
     hard_prompt: Optional[str] = field(default=None, metadata={"help": "The hard prompt for the backbone model."})
+    aggregate_type: Optional[str] = field(default="gated", metadata={"help": "The method to add the prefix attention to the original attention."})
+    normalize: Optional[bool] = field(default=False, metadata={"help": "Normalize the prefix features"})
+    side_pretrained_weight: Optional[str] = field(default=None, metadata={"help": "The pre-trained weight for the side transformer."})
+    sample_type: Optional[str] = field(default="interleaving", metadata={"help": "The method to sample the layer when number of side layers is smaller than the backbone's"})
+
+    # distillation
+
+    alpha_label: float = field(default=1, metadata={"help": "The weight for label loss for pre-training the side network."})
+    alpha_kl: float = field(default=1, metadata={"help": "The weight for kl divergence between teacher and student."})
+    alpha_cos: float = field(default=0, metadata={"help": "The weight for cos similarity loss for hidden states"})
+    restrict_kl_to_mask: bool = field(default=True, metadata={"help": "Whether to apply mask when computing kl div."})
+    temperature: float = field(default=0.1, metadata={"help": "The temperature for the softmax in kl div."})
+
+    teacher_model_name: Optional[str] = field(
+        default=None,
+        metadata={"help": "Path to teacher pretrained model or model identifier from huggingface.co/models"}
+    )
+    distillation_init: str = field(default="sum", metadata={"help": "Whether to init the distilled transformer."})
+    distillation_init_method: str = field(default="sequential", metadata={"help": "Whether to init the distilled transformer."})
+    distilled_block_ids: str = field(default=None, metadata={"help": "The layer assignment to merge the distilled transformer."})
+    distilled_block_weights: str = field(default=None, metadata={"help": "The weight assignments to merge the distilled transformer."})
+    scaling_factor: float = field(default=1, metadata={"help": "The scaling factor for RegMean type of methods."})
+    learnable_weight_type: str = field(default="scalar-shared", metadata={"help": "The type of the learnable merge weights."})
+    modules_to_merge: str = field(default=".*", metadata={"help": "The type of modules to merge."})

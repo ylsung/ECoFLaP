@@ -12,22 +12,21 @@ fi
 
 source scripts/env.sh
 
-file_name=pbp_hard_full_finetuning
+file_name=weight_init_infer
 
-pbp_reduction_factor=8
+lr=3e-4
+side_pretrained_weight=6-768
+model_name_or_path=full_finetuning_cola@0
+distillation_init="sum-rep"
+distilled_block_ids="[0,1,2,3,4,[5,6,7,8,9,10,11]]"
 
-enc_num_tokens=10
-dec_num_tokens=10
-prompts_expand_after=True
-lr=3e-3
-
-log_file_name=${file_name}_r${pbp_reduction_factor}_e${enc_num_tokens}_d${dec_num_tokens}_normalize
-output_dir=${home_path}/data/outputs/${file_name}_3
+log_file_name=${model_name_or_path}_${side_pretrained_weight}_${file_name}_lr${lr}_${distillation_init}_merge_last
+output_dir=${home_path}/data/outputs/${file_name}_1
 
 for seed in 0
 do
 
-for task in "cola" "mrpc" "qnli" "sst2" "rte" "mnli" "qqp" "stsb"
+for task in "cola"
 
 do
 
@@ -37,14 +36,15 @@ do
         --training_config_file configs/${file_name}.json \
         --task_name $task --eval_dataset_name $task --test_dataset_name $task \
         --seed ${seed}  \
+        --do_train False \
         --num_train_epochs ${num_epochs[$task]} \
-        --pbp_reduction_factor ${pbp_reduction_factor} \
-        --enc_num_tokens ${enc_num_tokens} \
-        --dec_num_tokens ${dec_num_tokens} \
-        --prompts_expand_after ${prompts_expand_after} \
         --learning_rate ${lr} \
         --output_dir ${output_dir} \
-        --normalize
+        --side_pretrained_weight ${side_pretrained_weight} \
+        --model_name_or_path outputs/${model_name_or_path} \
+        --tokenizer_name outputs/${model_name_or_path} \
+        --distilled_block_ids ${distilled_block_ids} \
+        --distillation_init ${distillation_init}
 
     cp ${output_dir}/all_results.json  all_output_logs/${log_file_name}_$task@${seed}.json
 

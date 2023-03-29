@@ -19,10 +19,12 @@ from seq2seq.methods.pbp_extra_input.t5_module_with_pbp import (
 from transformers.models.t5.modeling_t5 import T5LayerSelfAttention, T5LayerCrossAttention
 
 from seq2seq.methods.pruning.pruning_methods import pruning_v2
-from transformers import AutoTokenizer
+from transformers import AutoTokenizer, AutoConfig, AutoModelForSeq2SeqLM
 
 
 def t5_modify_with_pbp(transformer, petl_config):
+    if petl_config.side_pretrained_weight is not None:
+        return t5_modify_with_pbp_custom_side(transformer, petl_config)
 
     # Get tokenizer for processing prompts
     tokenizer = AutoTokenizer.from_pretrained(transformer.config._name_or_path)
@@ -37,6 +39,8 @@ def t5_modify_with_pbp(transformer, petl_config):
     side_config.d_kv //= petl_config.pbp_reduction_factor
 
     side_transformer = transformer.__class__(side_config)
+
+    side_transformer.resize_token_embeddings(len(tokenizer))
 
     backbone_modules = dict(transformer.named_modules())
     side_modules = dict(side_transformer.named_modules())
@@ -55,6 +59,7 @@ def t5_modify_with_pbp(transformer, petl_config):
     for m_name, module in dict(side_transformer.named_modules()).items():
         if re.fullmatch(".*SelfAttention|.*EncDecAttention", m_name):
             module.forward = functools.partial(T5AttentionPrefixWrapper.forward, module) # assign the self to the module (T5Attention) object
+            module.aggregate_type = petl_config.aggregate_type
 
     for m_name, module in dict(side_transformer.named_modules()).items():
         if isinstance(module, T5LayerSelfAttention):
@@ -62,7 +67,6 @@ def t5_modify_with_pbp(transformer, petl_config):
 
         elif isinstance(module, T5LayerCrossAttention):
             module.forward = functools.partial(T5LayerCrossAttentionPrefixWrapper.forward, module) # assign the self to the module (T5LayerCrossAttention) object
-
 
     side_transformer.encoder.embed_tokens = transformer.encoder.embed_tokens # Use the same embeddings
     side_transformer.decoder.embed_tokens = transformer.decoder.embed_tokens # Use the same embeddings
@@ -121,6 +125,66 @@ def t5_modify_with_pbp(transformer, petl_config):
     return transformer
 
 
+def t5_modify_with_pbp_custom_side(transformer, petl_config):
+
+    # Get tokenizer for processing prompts
+    tokenizer = AutoTokenizer.from_pretrained(transformer.config._name_or_path)
+
+
+    if petl_config.side_pretrained_weight is not None:
+        side_config = AutoConfig.from_pretrained(petl_config.side_pretrained_weight)
+        side_transformer = AutoModelForSeq2SeqLM.from_pretrained(petl_config.side_pretrained_weight)
+
+    side_transformer.resize_token_embeddings(len(tokenizer))
+
+    backbone_modules = dict(transformer.named_modules())
+    side_modules = dict(side_transformer.named_modules())
+
+    # overwrite the forward function of encoders and decoders for introducing prefix 
+    # transformer.encoder.forward = functools.partial(T5StackPrefixWrapper.forward, transformer.encoder)
+    # transformer.decoder.forward = functools.partial(T5StackPrefixWrapper.forward, transformer.decoder)
+
+    side_transformer.encoder.forward = functools.partial(T5StackPrefixWrapper.forward, side_transformer.encoder)
+    side_transformer.decoder.forward = functools.partial(T5StackPrefixWrapper.forward, side_transformer.decoder)
+
+    for m_name, module in dict(side_transformer.named_modules()).items():
+        if re.fullmatch(".*block[.][0-9]*", m_name):
+            module.forward = functools.partial(T5BlockPrefixWrapper.forward, module) # assign the self to the module (T5Block) object
+
+    for m_name, module in dict(side_transformer.named_modules()).items():
+        if re.fullmatch(".*SelfAttention|.*EncDecAttention", m_name):
+            module.forward = functools.partial(T5AttentionPrefixWrapper.forward, module) # assign the self to the module (T5Attention) object
+            module.aggregate_type = petl_config.aggregate_type
+
+    for m_name, module in dict(side_transformer.named_modules()).items():
+        if isinstance(module, T5LayerSelfAttention):
+            module.forward = functools.partial(T5LayerSelfAttentionPrefixWrapper.forward, module) # assign the self to the module (T5LayerSelfAttention) object
+
+        elif isinstance(module, T5LayerCrossAttention):
+            module.forward = functools.partial(T5LayerCrossAttentionPrefixWrapper.forward, module) # assign the self to the module (T5LayerCrossAttention) object
+
+    transformer.encoder = T5StackPBPWrapper(transformer.encoder, side_transformer.encoder, transformer.config, side_config, petl_config)
+    transformer.decoder = T5StackPBPWrapper(transformer.decoder, side_transformer.decoder, transformer.config, side_config, petl_config)
+    transformer.side_lm_head = side_transformer.lm_head
+    transformer.model_dim = side_transformer.model_dim
+
+    # set hard prompts
+    if petl_config.hard_prompt is not None:
+        hard_prompt_input_ids = tokenizer(
+            [petl_config.hard_prompt],
+            return_tensors="pt",
+        ).input_ids
+        transformer.encoder.set_hard_prompts(hard_prompt_input_ids)
+        transformer.decoder.set_hard_prompts(hard_prompt_input_ids)
+
+    # transformer.upsample = nn.Linear(side_config.d_model, transformer.config.d_model) # add the upsample layer
+    transformer.forward = functools.partial(T5ForConditionalGenerationPBPWrapper.forward, transformer) # assign the self to the module (T5ForConditionalGeneration) object
+    transformer._expand_inputs_for_generation = GenerationMixinPBPWrapper._expand_inputs_for_generation # for enable beam search for LST
+    # transformer._reorder_cache = functools.partial(T5ForConditionalGenerationPBPWrapper._reorder_cache, transformer) # for enable beam search for LST
+
+    return transformer
+
+
 if __name__ == "__main__":
     from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
     import argparse
@@ -149,6 +213,10 @@ if __name__ == "__main__":
             self.prompts_expand_after = True
             self.hard_prompt = None # "Find the relationship between the two concatenated sentences, or classify it if there is only one sentence."
             self.init_from_emb = True
+            self.aggregate_type = "gated"
+            self.normalize = False
+            self.side_pretrained_weight = "t5-small"
+            self.sample_type = "from_end"
 
     config = AdapterConfig(args.adapter_type)
     model = AutoModelForSeq2SeqLM.from_pretrained("t5-base")
@@ -213,11 +281,11 @@ if __name__ == "__main__":
                 else:
                     raise NotImplementedError
 
-        for p_name, param in model.named_parameters():
-            if "side" in p_name:
-                orig_name = p_name.replace(".side.", ".")
+        # for p_name, param in model.named_parameters():
+        #     if "side" in p_name:
+        #         orig_name = p_name.replace(".side.", ".")
 
-                assert torch.all(param == old_param[orig_name])
+        #         assert torch.all(param == old_param[orig_name])
 
     ## print model's trainable parameters (for sanity check)
     # for p_name, param in model.named_parameters():

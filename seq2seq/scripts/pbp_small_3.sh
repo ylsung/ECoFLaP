@@ -12,7 +12,7 @@ fi
 
 source scripts/env.sh
 
-file_name=pbp_hard_full_finetuning
+file_name=pbp
 
 pbp_reduction_factor=8
 
@@ -20,8 +20,10 @@ enc_num_tokens=10
 dec_num_tokens=10
 prompts_expand_after=True
 lr=3e-3
+side_pretrained_weight=t5-small
+sample_type=from_end
 
-log_file_name=${file_name}_r${pbp_reduction_factor}_e${enc_num_tokens}_d${dec_num_tokens}_normalize
+log_file_name=${side_pretrained_weight}_${file_name}_e${enc_num_tokens}_d${dec_num_tokens}_end
 output_dir=${home_path}/data/outputs/${file_name}_3
 
 for seed in 0
@@ -44,7 +46,8 @@ do
         --prompts_expand_after ${prompts_expand_after} \
         --learning_rate ${lr} \
         --output_dir ${output_dir} \
-        --normalize
+        --side_pretrained_weight $side_pretrained_weight \
+        --sample_type $sample_type
 
     cp ${output_dir}/all_results.json  all_output_logs/${log_file_name}_$task@${seed}.json
 

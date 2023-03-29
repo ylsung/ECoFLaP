@@ -12,39 +12,54 @@ fi
 
 source scripts/env.sh
 
-file_name=pbp_hard_full_finetuning
+file_name=distillation
 
 pbp_reduction_factor=8
 
 enc_num_tokens=10
 dec_num_tokens=10
 prompts_expand_after=True
-lr=3e-3
+lr=3e-4
+side_pretrained_weight=t5-small
+sample_type=interleaving
+larger_learning_rate_mult=10
 
-log_file_name=${file_name}_r${pbp_reduction_factor}_e${enc_num_tokens}_d${dec_num_tokens}_normalize
-output_dir=${home_path}/data/outputs/${file_name}_3
+
+log_file_name=${file_name}_t5-base_t5-small
+output_dir=${home_path}/data/outputs/${file_name}_2
 
 for seed in 0
 do
 
-for task in "cola" "mrpc" "qnli" "sst2" "rte" "mnli" "qqp" "stsb"
+for task in "c4"
 
 do
 
     rm -rf ${output_dir}
     
-    CUDA_VISIBLE_DEVICES=$1 python run_seq2seq.py \
+    CUDA_VISIBLE_DEVICES=$1 python run_distillation.py \
         --training_config_file configs/${file_name}.json \
         --task_name $task --eval_dataset_name $task --test_dataset_name $task \
         --seed ${seed}  \
-        --num_train_epochs ${num_epochs[$task]} \
+        --num_train_epochs 3 \
+        --preprocessing_num_workers 16 \
+        --model_name_or_path t5-base \
+        --tokenizer_name t5-base \
+        --learning_rate ${lr} \
+        --per_device_train_batch_size 1 \
+        --output_dir ${output_dir} \
+        --petl_method "pbp" \
         --pbp_reduction_factor ${pbp_reduction_factor} \
         --enc_num_tokens ${enc_num_tokens} \
         --dec_num_tokens ${dec_num_tokens} \
         --prompts_expand_after ${prompts_expand_after} \
         --learning_rate ${lr} \
         --output_dir ${output_dir} \
-        --normalize
+        --side_pretrained_weight $side_pretrained_weight \
+        --sample_type $sample_type \
+        --parameters_with_larger_lr ".*prompts.*|.*embed_to_kv.*|.*upsample.*|.*downsample.*" \
+        --trainable_param_names ".*prompts.*|.*embed_to_kv.*|.*upsample.*|.*side.*|.*downsample.*" \
+        --larger_learning_rate_mult $larger_learning_rate_mult
 
     cp ${output_dir}/all_results.json  all_output_logs/${log_file_name}_$task@${seed}.json
 

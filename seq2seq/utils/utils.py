@@ -131,6 +131,7 @@ def pad_punctuation(text):
 
 def num_parameters(model, petl_args):
     original_model_params_dict = {
+        "t5-small": 60492288,
         "t5-base": 222882048,
         "t5-large": 737639424,
         "t5-3b": 2851569664,
@@ -153,7 +154,16 @@ def num_parameters(model, petl_args):
     logger.info(f"Total trainable layernorm parameters {total_trainable_layernorm_params}")
     logger.info(f"Total parameters {total_params}")
 
-    original_model_params = original_model_params_dict[model.config._name_or_path]
+
+    original_model_params = None # default values
+    for key in original_model_params_dict.keys():
+        if key in model.config._name_or_path:
+            original_model_params = original_model_params_dict[key]
+
+    if original_model_params is None:
+        print("Didn't find a matched original model, so use the t5-base's size instead. Please make sure your model_name contain the keyword of t5-small, t5-base, t5-large, t5-3b.")
+        original_model_params = 222882048
+
     # total params since we have 8 task, it is Y = 1*BERT + 8*ADAPTERS, and final number is Y/BERT ("1.3x")
     total_trainable_params_percent =(total_trainable_params/original_model_params)*100
     total_trainable_bias_params_percent =(total_trainable_bias_params/total_trainable_params)*100

@@ -22,19 +22,22 @@ class AbstractTask(abc.ABC):
     prefix = NotImplemented
     preprocessor: Callable = NotImplemented
     metric = NotImplemented
-    metric_names = NotImplemented
+    metric_names = None
     split_map = None
     labels_list = None
     split_to_data_split: Mapping[str, str] = \
         {"train": "train", "validation": "validation", "test": "test"}
     small_datasets_without_all_splits = ["cola", "wnli", "rte", "superglue-cb", "superglue-copa", "superglue-multirc",
                                          "superglue-wic", "superglue-wsc.fixed", "superglue-rte", "mrpc", "stsb",
-                                         "superglue-boolq"]
-    large_data_without_all_splits = ["qqp", "qnli", "superglue-record", "sst2"]
-
+                                         "superglue-boolq", "winogrande", "winogrande_debiased"]
+    large_data_without_all_splits = ["qqp", "qnli", "superglue-record", "sst2", "squad_v2"]
+    
     def __init__(self, config, seed=42):
         self.config = config
         self.seed = seed
+
+    def get_desired_metric_names(self):
+        return self.metric_names
 
     def get_max_target_length(self, tokenizer, default_max_length):
         if self.labels_list is not None:
@@ -48,10 +51,11 @@ class AbstractTask(abc.ABC):
                        extra_fields={}):
         src_prefix = self.name if prefix is None else prefix
         sources = [src_prefix]+sources if add_prefix else sources
+        extra_fields["task"] = self.name
         return {'source': ' '.join(sources),
                 'target': ' '.join(targets),
-                'task': self.name,
-                # 'extra_fields': extra_fields
+                # 'task': self.name,
+                'extra_fields': extra_fields,
                 }
 
     def check_n_obs(self, n_obs, total_size):
@@ -139,6 +143,87 @@ class Squad(AbstractTask):
                   "context:", context]
         target = [answer]
         return self.seq2seq_format(source, target, add_prefix)
+
+
+class SquadV2(AbstractTask):
+    name = "squad_v2"
+    split_to_data_split = {"train": "train",
+                           "validation": "validation",
+                           "test": "validation"}
+
+    metric_names = ["exact", "f1"]
+
+    def load_dataset(self, split):
+        return datasets.load_dataset(self.name, split=split)
+
+    def load_metric(self):
+        return evaluate.load(self.name)
+
+    def preprocessor(self, example, add_prefix):
+        
+        if len(example['answers']['text']) == 0:
+            answer = ""
+        else:
+            answer = pad_punctuation(example['answers']['text'][0])
+
+        question = pad_punctuation(example['question'])
+        context = pad_punctuation(example['context'])
+        source = ["question:", question,
+                  "context:", context]
+        target = [answer]
+
+        extra_fields = {"answers": example["answers"], "id": example["id"]}
+
+        return self.seq2seq_format(source, target, add_prefix, extra_fields=extra_fields)
+
+
+class Winogrande(AbstractTask):
+    name = "winogrande_debiased"
+    labels_list = ['1', '2']
+    split_to_data_split = {"train": "train",
+                           "validation": "validation",
+                           "test": "validation"}
+
+    metric_names = ["accuracy"]
+
+    def load_dataset(self, split):
+        return datasets.load_dataset("winogrande", self.name, split=split)
+
+    def load_metric(self):
+        return evaluate.load("accuracy")
+
+    def preprocessor(self, example, add_prefix=True):
+
+        # sentence (string)	option1 (string)	option2 (string)
+        src_texts = ["sentence:", example["sentence"], 
+                     "option1:", example["option1"],
+                     "option2:", example["option2"]]
+        tgt_texts = [str(example["answer"])]
+        return self.seq2seq_format(src_texts, tgt_texts, add_prefix)
+
+
+class MLM(AbstractTask):
+    name = "mlm"
+    metric = metrics.accuracy
+
+    def load_metric(self):
+        return evaluate.load("accuracy")
+
+
+class C4(AbstractTask):
+    name = "allenai/c4"
+    metric = metrics.accuracy
+
+    def load_metric(self):
+        return evaluate.load("accuracy")
+
+    def load_dataset(self, split):
+        return datasets.load_dataset(self.name, 'en', split=split, cache_dir="/nas-ssd/ylsung/.cache/huggingface/", num_proc=16)
+
+    def preprocessor(self, example, add_prefix=True):
+        src_texts = [example['text']]
+        tgt_texts = ["dummy"]
+        return self.seq2seq_format(src_texts, tgt_texts, add_prefix)
 
 
 class GLUE(AbstractTask):
@@ -341,7 +426,7 @@ class SuperGLUECB(SUPERGLUE):
                            "validation": "validation",
                            "test": "validation"}
     metric = [metrics.mean_multiclass_f1(num_classes=3), metrics.accuracy]
-    metric_names = ["f1_multiclass", "accuracy"]
+    metric_names = ["f1", "accuracy"]
 
     def preprocessor(self, example, add_prefix=True):
         src_texts = ["premise:", example["premise"], "hypothesis:", example["hypothesis"]]
@@ -374,7 +459,7 @@ class SuperGLUEMultiRC(SUPERGLUE):
                            "test": "validation"}
     metric = [metrics.multirc_f1_over_all_answers,
               metrics.mean_group_metric(metrics.exact_match)]
-    metric_names = ["f1", "em"]
+    metric_names = ["f1_a", "exact_match"]
 
     def remove_markup(self, text):
         """Removes the HTML markup."""
@@ -391,7 +476,7 @@ class SuperGLUEMultiRC(SUPERGLUE):
                      "answer:", self.remove_markup(example["answer"]),
                      "paragraph:", self.remove_markup(example["paragraph"])]
         tgt_texts = [str(example["label"])]
-        return self.seq2seq_format(src_texts, tgt_texts, add_prefix, extra_fields={"group": group})
+        return self.seq2seq_format(src_texts, tgt_texts, add_prefix, extra_fields={"idx": example["idx"]})
 
    
 
@@ -491,7 +576,7 @@ class SuperGLUERecord(SUPERGLUE):
                            "validation": "validation",
                            "test": "validation"}
     metric = [metrics.squad]
-    metric_names = ["squad"] 
+    metric_names = ["exact_match", "f1"] 
     
     def preprocessor(self, batch, add_prefix=True):
         new_batch = collections.defaultdict(list)
@@ -507,11 +592,9 @@ class SuperGLUERecord(SUPERGLUE):
                 inputs = self.name + " " + inputs 
             # duplicates the samples based on  number of answers.
             num_answers = len(ex["answers"])
-            num_duplicates = np.maximum(1, num_answers)
-            new_batch["source"].extend([inputs] * num_duplicates) 
-            new_batch["target"].extend(ex["answers"] if num_answers > 0 else ["<unk>"])
-            new_batch["task"].extend([self.name] * num_duplicates)
-            new_batch["extra_fields"].extend([{"answers": ex["answers"]}]*num_duplicates) 
+            new_batch["source"].extend([inputs]) 
+            new_batch["target"].extend([ex["answers"][0]] if num_answers > 1 else ["<unk>"])
+            new_batch["extra_fields"].extend([{"idx": ex["idx"], "answers": ex["answers"], "task": self.name}]) 
         return new_batch
     
     def map_dataset(self, dataset, add_prefix=True):
@@ -522,6 +605,8 @@ class SuperGLUERecord(SUPERGLUE):
 TASK_MAPPING = OrderedDict(
     [
         ('squad', Squad),
+        ('squad_v2', SquadV2),
+        ('winogrande_debiased', Winogrande),
         ('mrpc', MRPC),
         ('cola', COLA),
         ('sst2', SST2),
@@ -538,7 +623,9 @@ TASK_MAPPING = OrderedDict(
         ('superglue-multirc', SuperGLUEMultiRC),
         ('superglue-wic', SuperGLUEWIC),
         ('superglue-wsc.fixed', SuperGLUEWSCFixed),
-        ('superglue-record', SuperGLUERecord)
+        ('superglue-record', SuperGLUERecord),
+        ('mlm', MLM),
+        ('c4', C4)
     ]
 )
 

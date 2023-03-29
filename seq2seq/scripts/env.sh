@@ -14,3 +14,60 @@ num_epochs["superglue-wic"]=20
 num_epochs["superglue-cb"]=20
 num_epochs["superglue-copa"]=20
 num_epochs["superglue-record"]=10
+num_epochs["squad_v2"]=2
+num_epochs["winogrande_debiased"]=20
+
+declare -A max_source_length
+max_source_length["rte"]=128
+max_source_length["qnli"]=128
+max_source_length["mnli"]=128
+max_source_length["cola"]=128
+max_source_length["sst2"]=128
+max_source_length["mrpc"]=128
+max_source_length["qqp"]=128
+max_source_length["stsb"]=128
+max_source_length["superglue-boolq"]=128
+max_source_length["superglue-multirc"]=128
+max_source_length["superglue-wic"]=128
+max_source_length["superglue-cb"]=128
+max_source_length["superglue-copa"]=128
+max_source_length["superglue-record"]=128
+max_source_length["squad_v2"]=384
+max_source_length["winogrande_debiased"]=128
+
+declare -A batch_size
+batch_size["rte"]=100
+batch_size["qnli"]=100
+batch_size["mnli"]=100
+batch_size["cola"]=100
+batch_size["sst2"]=100
+batch_size["mrpc"]=100
+batch_size["qqp"]=100
+batch_size["stsb"]=100
+batch_size["superglue-boolq"]=100
+batch_size["superglue-multirc"]=100
+batch_size["superglue-wic"]=100
+batch_size["superglue-cb"]=100
+batch_size["superglue-copa"]=100
+batch_size["superglue-record"]=100
+batch_size["squad_v2"]=32
+batch_size["winogrande_debiased"]=100
+
+# declare -A wwwwww
+# wwwwww["rte"]=zzz
+# wwwwww["qnli"]=zzz
+# wwwwww["mnli"]=zzz
+# wwwwww["cola"]=zzz
+# wwwwww["sst2"]=zzz
+# wwwwww["mrpc"]=zzz
+# wwwwww["qqp"]=zzz
+# wwwwww["stsb"]=zzz
+# wwwwww["superglue-boolq"]=zzz
+# wwwwww["superglue-multirc"]=zzz
+# wwwwww["superglue-wic"]=zzz
+# wwwwww["superglue-cb"]=zzz
+# wwwwww["superglue-copa"]=zzz
+# wwwwww["superglue-record"]=zzz
+
+
+

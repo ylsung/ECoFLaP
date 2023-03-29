@@ -16,16 +16,18 @@ file_name=prefix_tuning
 enc_num_tokens=10
 dec_num_tokens=10
 prompts_expand_after=True
-lr=3e-3
+lr=3e-4
 prefix_dim=64
 
-log_file_name=${file_name}_e${enc_num_tokens}_d${dec_num_tokens}_dim${prefix_dim}_lr${lr}
+model_name_or_path=t5-small
+
+log_file_name=${model_name_or_path}_full_finetuning_${file_name}_e${enc_num_tokens}_d${dec_num_tokens}_dim${prefix_dim}_lr${lr}
 output_dir=${home_path}/data/outputs/${file_name}_4
 
 for seed in 0
 do
 
-for task in "mnli" "qqp" "stsb"
+for task in "cola" "mrpc" "qnli" "sst2" "rte" "mnli" "qqp" "stsb"
 
 do
 
@@ -41,7 +43,10 @@ do
         --prompts_expand_after ${prompts_expand_after} \
         --learning_rate ${lr} \
         --prefix_dim ${prefix_dim} \
-        --output_dir ${output_dir}
+        --output_dir ${output_dir} \
+        --model_name_or_path ${model_name_or_path} \
+        --tokenizer_name ${model_name_or_path} \
+        --trainable_param_names ".*"
 
     cp ${output_dir}/all_results.json  all_output_logs/${log_file_name}_$task@${seed}.json
 

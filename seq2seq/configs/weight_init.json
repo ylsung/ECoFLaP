@@ -1,4 +1,7 @@
 {
+    "petl_method": "weight_init",
+    "side_pretrained_weight": "6-768",
+
     "do_train": true,
     "do_eval": true,
     "do_test": true,
@@ -15,8 +18,8 @@
     "evaluation_strategy": "epoch",
     "save_strategy": "epoch",
     "max_source_length": 128,
-    "learning_rate": 0.0003,
-    "output_dir": "outputs/full_finetuning",
+    "learning_rate": 0.003,
+    "output_dir": "outputs/lst",
     "split_validation_test": true,
     "task_name": "stsb",
     "eval_dataset_name": "stsb",

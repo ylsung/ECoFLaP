@@ -107,7 +107,7 @@ class T5AttentionVanilla(nn.Module):
             else:
                 position_bias = self.compute_bias(real_seq_length, key_length, device=scores.device)
 
-            print("pre position_bias: ", position_bias.shape)
+            # print("pre position_bias: ", position_bias.shape)
 
             # if key and values are already calculated
             # we want only the last query position bias
@@ -115,20 +115,20 @@ class T5AttentionVanilla(nn.Module):
                 position_bias = position_bias[:, :, -hidden_states.size(1) :, :]
 
             if mask is not None:
-                print("mask", mask.shape)
+                # print("mask", mask.shape)
 
                 position_bias = position_bias + mask  # (batch_size, n_heads, seq_length, key_length)
 
-            print(self.is_decoder)
-            print(attn_type)
-            print("hidden_states, key_states: ", hidden_states.shape, key_states.shape)
-            print("seq_length, real_seq_length, query_length: ", seq_length, real_seq_length, query_length)
-            print("position_bias: ", position_bias.shape)
-            print("score.shape", scores.shape)
+            # print(self.is_decoder)
+            # print(attn_type)
+            # print("hidden_states, key_states: ", hidden_states.shape, key_states.shape)
+            # print("seq_length, real_seq_length, query_length: ", seq_length, real_seq_length, query_length)
+            # print("position_bias: ", position_bias.shape)
+            # print("score.shape", scores.shape)
 
-            print("query_states: ", query_states.shape)
+            # print("query_states: ", query_states.shape)
 
-            print("==")
+            # print("==")
 
         if self.pruned_heads:
             mask = torch.ones(position_bias.shape[1])
@@ -287,6 +287,31 @@ class T5ForConditionalGenerationVanilla(nn.Module):
         if labels is not None:
             loss_fct = CrossEntropyLoss(ignore_index=-100)
             loss = loss_fct(lm_logits.view(-1, lm_logits.size(-1)), labels.view(-1))
+
+            if getattr(self, "teacher", None) is not None:
+                
+                loss = self.compute_distillation_loss(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    decoder_input_ids=decoder_input_ids,
+                    decoder_attention_mask=decoder_attention_mask,
+                    head_mask=head_mask,
+                    decoder_head_mask=decoder_head_mask,
+                    cross_attn_head_mask=cross_attn_head_mask,
+                    past_key_values=past_key_values,
+                    inputs_embeds=inputs_embeds,
+                    decoder_inputs_embeds=decoder_inputs_embeds,
+                    labels=labels,
+                    use_cache=use_cache,
+                    output_attentions=output_attentions,
+                    output_hidden_states=output_hidden_states,
+                    return_dict=return_dict,
+
+                    lm_logits=lm_logits,
+                    encoder_outputs=encoder_outputs,
+                    decoder_outputs=decoder_outputs,
+                )
+
             # TODO(thom): Add z_loss https://github.com/tensorflow/mesh/blob/fa19d69eafc9a482aff0b59ddd96b025c0cb207d/mesh_tensorflow/layers.py#L666
 
         # if not self.training:

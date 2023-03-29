@@ -106,6 +106,7 @@ class T5AttentionPrefixWrapper(nn.Module):
                     #     hidden_states = torch.cat([past_key_value, shape(proj_layer(key_value_states))], dim=2) # concat prefix and encoder-decoder outputs
 
             if prefix_key_value is not None:
+                # prefix_key_value = prefix_key_value / 768
                 hidden_states = torch.cat([prefix_key_value, hidden_states], dim=2)
             
             return hidden_states, attn_type
@@ -198,10 +199,30 @@ class T5AttentionPrefixWrapper(nn.Module):
             position_bias_masked = position_bias
 
         scores += position_bias_masked
+
         attn_weights = nn.functional.softmax(scores.float(), dim=-1).type_as(
-            scores
-        )  # (batch_size, n_heads, seq_length, key_length)
-        
+                scores
+            )  # (batch_size, n_heads, seq_length, key_length)
+    
+        # if self.aggregate_type == "gated":
+        #     attn_weights = nn.functional.softmax(scores.float(), dim=-1).type_as(
+        #         scores
+        #     )  # (batch_size, n_heads, seq_length, key_length)
+        # elif "scaled" in self.aggregate_type:
+        #     scalar = float(self.aggregate_type.split("-")[-1])
+
+        #     prefix_attn_weights = nn.functional.softmax(scores[:, :, :, :self.prefix_length].float(), dim=-1).type_as(
+        #         scores
+        #     )
+
+        #     prefix_attn_weights = prefix_attn_weights * scalar
+            
+        #     other_attn_weights = nn.functional.softmax(scores[:, :, :, self.prefix_length:].float(), dim=-1).type_as(
+        #         scores
+        #     )
+
+        #     attn_weights = torch.cat([prefix_attn_weights, other_attn_weights], dim=-1)
+
         # if not self.training:
         #     print(torch.argmax(attn_weights, dim=-1))
 
@@ -676,6 +697,8 @@ class T5StackPBPWrapper(nn.Module):
 
         self.backbone = T5_backbone
         self.side = T5_side
+        self.side_config = side_config
+        self.petl_config = petl_config
 
         self.is_decoder = self.backbone.is_decoder
 
@@ -684,9 +707,12 @@ class T5StackPBPWrapper(nn.Module):
             self.register_buffer("hard_prompt", None)
 
             self.prompts = self.generate_trainable_prompts_embeddings(petl_config.dec_num_tokens, config.d_model, petl_config.init_from_emb) # batch size is 1
+            shared_layer = nn.Linear(config.d_model, side_config.d_model)
             self.embed_to_kv = nn.ModuleList(
-                [nn.Linear(config.d_model, side_config.d_model * 4) for _ in range(config.num_decoder_layers)]
+                [self.construct_proj_layer(config.d_model, side_config.d_model, side_config.d_model * 4, shared_first_layer=shared_layer) for _ in range(side_config.num_decoder_layers)]
             ) # for self-attn and cross-attn
+
+            self.num_side_layers = side_config.num_decoder_layers
 
             # self.backbone.prefix_length = self.prompts.shape[1]
             # self.side.prefix_length = self.prompts.shape[1]
@@ -696,19 +722,34 @@ class T5StackPBPWrapper(nn.Module):
             # self.hard_prompt = None
             self.register_buffer("hard_prompt", None)
             self.prompts = self.generate_trainable_prompts_embeddings(petl_config.enc_num_tokens, config.d_model, petl_config.init_from_emb) # batch size is 1
+            shared_layer = nn.Linear(config.d_model, side_config.d_model)
             self.embed_to_kv = nn.ModuleList(
-                [nn.Linear(config.d_model, side_config.d_model * 2) for _ in range(config.num_layers)]
+                [self.construct_proj_layer(config.d_model, side_config.d_model, side_config.d_model * 2, shared_first_layer=shared_layer) for _ in range(side_config.num_layers)]
             ) # for self-attn and cross-attn
 
+            self.num_side_layers = side_config.num_layers
             # self.backbone.prefix_length = self.prompts.shape[1]
             # self.side.prefix_length = self.prompts.shape[1]
 
             self.set_prefix_length(self.prompts.shape[1])
 
-        self.downsample = nn.Linear(config.d_model, side_config.d_model)
+        if petl_config.side_pretrained_weight is None:
+            self.downsample = nn.Linear(config.d_model, side_config.d_model)
 
         self.main_input_name = self.side.main_input_name
         self.prompts_expand_after = petl_config.prompts_expand_after # save memory for training and inference but doesn't work for when using beam search
+
+    def construct_proj_layer(self, input_dim, mid_dim, output_dim, shared_first_layer=None):
+        if shared_first_layer is None:
+            first_layer = nn.Linear(input_dim, mid_dim)
+        else:
+            first_layer = shared_first_layer
+            
+        return nn.Sequential(
+            first_layer,
+            nn.Tanh(),
+            nn.Linear(mid_dim, output_dim)
+        )
 
     def generate_trainable_prompts_embeddings(self, num_tokens, d_model, init_from_emb=False):
 
@@ -778,18 +819,43 @@ class T5StackPBPWrapper(nn.Module):
                 return_dict=True,
             )
 
+            def sample(input_list, num_take, sample_type):                                                                                                     
+                input_len = len(input_list)                                                                                                       
+                r = input_len // num_take      
+
+                if sample_type == "interleaving":
+                    indices = [i * r for i in range(num_take)]
+                elif sample_type == "reversed_interleaving":
+                    indices = list(reversed([i * r for i in range(num_take)]))
+                elif sample_type == "from_end":
+                    indices = [i for i in range(num_take)]
+                else:
+                    raise NotImplementedError
+                reversed_input_list = list(reversed(input_list))                                                        
+                output_list = [reversed_input_list[i] for i in reversed(indices)]                                                                 
+                return output_list
+
+            pre_prefixes = list(prefix_for_side.hidden_states)
+
+            pre_prefixes = sample(pre_prefixes, self.num_side_layers, self.petl_config.sample_type)
+
             prefixes = []
 
-            for h, embed_to_kv_layer in zip(prefix_for_side.hidden_states, self.embed_to_kv):
+            for h, embed_to_kv_layer in zip(pre_prefixes, self.embed_to_kv):
                 
                 chunks = 2 if not self.is_decoder else 4
 
                 L = prompts.shape[1]
+
+                # h = h / 768
                 h = embed_to_kv_layer(h) # (1, L, 2D) or (1, L, 4D)
+
+                if self.petl_config.normalize:
+                    h = h / self.side_config.d_model
 
                 if self.prompts_expand_after:
                     h = h.expand(B, -1, -1) # (B, L, 2D)
-                h = h.reshape(B, L, self.config.num_heads, h.shape[-1] // self.config.num_heads) # (B, L, H, 2 * D_per_head)
+                h = h.reshape(B, L, self.side_config.num_heads, h.shape[-1] // self.side_config.num_heads) # (B, L, H, 2 * D_per_head)
                 h = h.transpose(1, 2) # (B, H, L, 2 D_per_head)
 
                 # h = torch.zeros_like(h)
@@ -804,7 +870,10 @@ class T5StackPBPWrapper(nn.Module):
 
             decoder_first_token_or_encoder = True
 
-        inputs_embeds = self.downsample(self.backbone.embed_tokens(input_ids))
+        if getattr(self, "downsample", None) is not None:
+            inputs_embeds = self.downsample(self.backbone.embed_tokens(input_ids))
+        else:
+            inputs_embeds = self.side.embed_tokens(input_ids)
 
         # Insert the prefix
         side_output = self.side(
@@ -956,31 +1025,61 @@ class T5ForConditionalGenerationPBPWrapper(nn.Module):
         else:
             sequence_output = decoder_outputs.last_hidden_state["side"]
 
-        sequence_output = self.upsample(sequence_output)
+        if getattr(self, "upsample", None) is not None:
+            sequence_output = self.upsample(sequence_output)
+            lm_head = self.lm_head
+        else:
+            lm_head = self.side_lm_head
 
         # Set device for model parallelism
         if self.model_parallel:
             torch.cuda.set_device(self.encoder.first_device)
-            self.lm_head = self.lm_head.to(self.encoder.first_device)
-            sequence_output = sequence_output.to(self.lm_head.weight.device)
+            lm_head = lm_head.to(self.encoder.first_device)
+            sequence_output = sequence_output.to(lm_head.weight.device)
 
         if self.config.tie_word_embeddings:
             # Rescale output before projecting on vocab
             # See https://github.com/tensorflow/mesh/blob/fa19d69eafc9a482aff0b59ddd96b025c0cb207d/mesh_tensorflow/transformer/transformer.py#L586
             sequence_output = sequence_output * (self.model_dim**-0.5)
 
-        lm_logits = self.lm_head(sequence_output)
+        lm_logits = lm_head(sequence_output)
 
         loss = None
+
         if labels is not None:
             loss_fct = CrossEntropyLoss(ignore_index=-100)
             loss = loss_fct(lm_logits.view(-1, lm_logits.size(-1)), labels.view(-1))
             # TODO(thom): Add z_loss https://github.com/tensorflow/mesh/blob/fa19d69eafc9a482aff0b59ddd96b025c0cb207d/mesh_tensorflow/layers.py#L666
 
-        if not self.training:
-            # print(torch.max(lm_logits, dim=-1)[0])
+            if getattr(self, "teacher", None) is not None:
+                
+                loss = self.compute_distillation_loss(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    decoder_input_ids=decoder_input_ids,
+                    decoder_attention_mask=decoder_attention_mask,
+                    head_mask=head_mask,
+                    decoder_head_mask=decoder_head_mask,
+                    cross_attn_head_mask=cross_attn_head_mask,
+                    past_key_values=past_key_values,
+                    inputs_embeds=inputs_embeds,
+                    decoder_inputs_embeds=decoder_inputs_embeds,
+                    labels=labels,
+                    use_cache=use_cache,
+                    output_attentions=output_attentions,
+                    output_hidden_states=output_hidden_states,
+                    return_dict=return_dict,
 
-            print(torch.argmax(lm_logits, dim=-1))
+                    lm_logits=lm_logits,
+                    encoder_outputs=encoder_outputs,
+                    decoder_outputs=decoder_outputs,
+                )
+
+
+        # if not self.training:
+        #     # print(torch.max(lm_logits, dim=-1)[0])
+
+        #     print(torch.argmax(lm_logits, dim=-1))
             
             # if labels is not None:
                 # print("label")
