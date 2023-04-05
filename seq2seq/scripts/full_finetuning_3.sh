@@ -18,13 +18,12 @@ model_name_or_path=t5-base
 # --model_name_or_path /playpen-ssd/ylsung/data/outputs/${model_name_or_path} \
 # --tokenizer_name /playpen-ssd/ylsung/data/outputs/${model_name_or_path} \
 
-lr=1e-3
 
 output_path=${home_path}/data/outputs/${file_name}_3
 for seed in 0
 do
 
-for task in "superglue-record" "winogrande_debiased" "squad_v2" "superglue-cb" # "winogrande_debiased" # "squad_v2"  "superglue-record" "superglue-multirc" "superglue-boolq" "superglue-cb" "superglue-multirc" "superglue-wic" "superglue-copa"
+for task in "superglue-record" # "winogrande_debiased" "squad_v2" "superglue-cb" # "winogrande_debiased" # "squad_v2"  "superglue-record" "superglue-multirc" "superglue-boolq" "superglue-cb" "superglue-multirc" "superglue-wic" "superglue-copa"
 
 do
     rm -rf outputs/${file_name}/
@@ -38,49 +37,288 @@ do
         --per_device_train_batch_size ${batch_size[$task]} \
         --per_device_eval_batch_size ${batch_size[$task]} \
         --output_dir ${output_path} \
-        --learning_rate ${lr} \
         --model_name_or_path ${model_name_or_path} \
         --tokenizer_name ${model_name_or_path}
 
-    cp ${output_path}/all_results.json  all_output_logs/${model_name_or_path}_${file_name}_${lr}_$task@${seed}.json
+    cp ${output_path}/all_results.json  all_output_logs/${model_name_or_path}_${file_name}_$task@${seed}.json
 
 done
 
 done
 
 
-model_name_or_path=t5-small
+# model_name_or_path=t5-small
 
-# --model_name_or_path /playpen-ssd/ylsung/data/outputs/${model_name_or_path} \
-# --tokenizer_name /playpen-ssd/ylsung/data/outputs/${model_name_or_path} \
+# # --model_name_or_path /playpen-ssd/ylsung/data/outputs/${model_name_or_path} \
+# # --tokenizer_name /playpen-ssd/ylsung/data/outputs/${model_name_or_path} \
 
-lr=1e-3
 
-output_path=${home_path}/data/outputs/${file_name}_3
-for seed in 0
-do
+# output_path=${home_path}/data/outputs/${file_name}_3
+# for seed in 0
+# do
 
-for task in "superglue-record" "winogrande_debiased" "squad_v2" "superglue-cb" # "winogrande_debiased" # "squad_v2"  "superglue-record" "superglue-multirc" "superglue-boolq" "superglue-cb" "superglue-multirc" "superglue-wic" "superglue-copa"
+# for task in "superglue-record" # "winogrande_debiased" "squad_v2" "superglue-cb" # "winogrande_debiased" # "squad_v2"  "superglue-record" "superglue-multirc" "superglue-boolq" "superglue-cb" "superglue-multirc" "superglue-wic" "superglue-copa"
 
-do
-    rm -rf outputs/${file_name}/
+# do
+#     rm -rf outputs/${file_name}/
     
-    CUDA_VISIBLE_DEVICES=$1 python run_seq2seq.py \
-        --training_config_file configs/${file_name}.json \
-        --task_name $task --eval_dataset_name $task --test_dataset_name $task \
-        --seed ${seed} \
-        --num_train_epochs ${num_epochs[$task]} \
-        --max_source_length ${max_source_length[$task]} \
-        --per_device_train_batch_size ${batch_size[$task]} \
-        --per_device_eval_batch_size ${batch_size[$task]} \
-        --output_dir ${output_path} \
-        --learning_rate ${lr} \
-        --model_name_or_path ${model_name_or_path} \
-        --tokenizer_name ${model_name_or_path}
+#     CUDA_VISIBLE_DEVICES=$1 python run_seq2seq.py \
+#         --training_config_file configs/${file_name}.json \
+#         --task_name $task --eval_dataset_name $task --test_dataset_name $task \
+#         --seed ${seed} \
+#         --num_train_epochs ${num_epochs[$task]} \
+#         --max_source_length ${max_source_length[$task]} \
+#         --per_device_train_batch_size ${batch_size[$task]} \
+#         --per_device_eval_batch_size ${batch_size[$task]} \
+#         --output_dir ${output_path} \
+#         --model_name_or_path ${model_name_or_path} \
+#         --tokenizer_name ${model_name_or_path}
 
-    cp ${output_path}/all_results.json  all_output_logs/${model_name_or_path}_${file_name}_${lr}_$task@${seed}.json
+#     cp ${output_path}/all_results.json  all_output_logs/${model_name_or_path}_${file_name}_$task@${seed}.json
 
-done
+# done
 
-done
+# done
 
+
+# file_name=weight_init
+
+# lr=3e-4
+# side_pretrained_weight=6-768
+# model_name_or_path=t5-base
+# distillation_init="sum"
+# distilled_block_ids="[0,1,2,3,4,[5,6,7,8,9,10,11]]"
+# distilled_block_weights=None
+
+# modules_to_merge=".*|.*"
+
+# log_file_name=${model_name_or_path}_${side_pretrained_weight}_${file_name}_lr${lr}_${distillation_init}_take_first_merge_last
+# output_dir=${home_path}/data/outputs/${file_name}_4
+
+# for seed in 0
+# do
+
+# for task in "superglue-record"
+# do
+
+#     rm -rf ${output_dir}
+    
+#     CUDA_VISIBLE_DEVICES=$1 python run_seq2seq.py \
+#         --training_config_file configs/${file_name}.json \
+#         --task_name $task --eval_dataset_name $task --test_dataset_name $task \
+#         --seed ${seed}  \
+#         --num_train_epochs ${num_epochs[$task]} \
+#         --max_source_length ${max_source_length[$task]} \
+#         --per_device_train_batch_size ${batch_size[$task]} \
+#         --per_device_eval_batch_size ${batch_size[$task]} \
+#         --learning_rate ${lr} \
+#         --output_dir ${output_dir} \
+#         --side_pretrained_weight ${side_pretrained_weight} \
+#         --model_name_or_path ${model_name_or_path} \
+#         --tokenizer_name ${model_name_or_path} \
+#         --distilled_block_ids ${distilled_block_ids} \
+#         --distillation_init ${distillation_init} \
+#         --distilled_block_weights ${distilled_block_weights} \
+#         --modules_to_merge ${modules_to_merge}
+
+#     cp ${output_dir}/all_results.json  all_output_logs/${log_file_name}_$task@${seed}.json
+
+# done
+# done
+
+
+
+# modules_to_merge=".*Attention.*|.*DenseReluDense.*"
+
+# log_file_name=${model_name_or_path}_${side_pretrained_weight}_${file_name}_lr${lr}_${distillation_init}_attnffn_take_first_merge_last
+# output_dir=${home_path}/data/outputs/${file_name}_4
+
+# for seed in 0
+# do
+
+# for task in "superglue-record"
+# do
+
+#     rm -rf ${output_dir}
+    
+#     CUDA_VISIBLE_DEVICES=$1 python run_seq2seq.py \
+#         --training_config_file configs/${file_name}.json \
+#         --task_name $task --eval_dataset_name $task --test_dataset_name $task \
+#         --seed ${seed}  \
+#         --num_train_epochs ${num_epochs[$task]} \
+#         --max_source_length ${max_source_length[$task]} \
+#         --per_device_train_batch_size ${batch_size[$task]} \
+#         --per_device_eval_batch_size ${batch_size[$task]} \
+#         --learning_rate ${lr} \
+#         --output_dir ${output_dir} \
+#         --side_pretrained_weight ${side_pretrained_weight} \
+#         --model_name_or_path ${model_name_or_path} \
+#         --tokenizer_name ${model_name_or_path} \
+#         --distilled_block_ids ${distilled_block_ids} \
+#         --distillation_init ${distillation_init} \
+#         --distilled_block_weights ${distilled_block_weights} \
+#         --modules_to_merge ${modules_to_merge}
+
+#     cp ${output_dir}/all_results.json  all_output_logs/${log_file_name}_$task@${seed}.json
+
+# done
+# done
+
+
+# side_pretrained_weight=6-768
+# model_name_or_path=t5-base
+# distillation_init="sum"
+# distilled_block_ids="[0,1,2,3,4,[5,6,7,8,9,10,11]]"
+# distilled_block_weights=None
+# modules_to_merge=".*layer_norm.*|.*DenseReluDense.*"
+
+# log_file_name=${model_name_or_path}_${side_pretrained_weight}_${file_name}_lr${lr}_${distillation_init}_ffnLM_take_first_merge_last
+# output_dir=${home_path}/data/outputs/${file_name}_4
+
+# for seed in 0
+# do
+
+# for task in "superglue-record"
+# do
+
+#     rm -rf ${output_dir}
+    
+#     CUDA_VISIBLE_DEVICES=$1 python run_seq2seq.py \
+#         --training_config_file configs/${file_name}.json \
+#         --task_name $task --eval_dataset_name $task --test_dataset_name $task \
+#         --seed ${seed}  \
+#         --num_train_epochs ${num_epochs[$task]} \
+#         --max_source_length ${max_source_length[$task]} \
+#         --per_device_train_batch_size ${batch_size[$task]} \
+#         --per_device_eval_batch_size ${batch_size[$task]} \
+#         --learning_rate ${lr} \
+#         --output_dir ${output_dir} \
+#         --side_pretrained_weight ${side_pretrained_weight} \
+#         --model_name_or_path ${model_name_or_path} \
+#         --tokenizer_name ${model_name_or_path} \
+#         --distilled_block_ids ${distilled_block_ids} \
+#         --distillation_init ${distillation_init} \
+#         --distilled_block_weights ${distilled_block_weights} \
+#         --modules_to_merge ${modules_to_merge}
+
+#     cp ${output_dir}/all_results.json  all_output_logs/${log_file_name}_$task@${seed}.json
+
+# done
+# done
+
+
+# modules_to_merge=".*DenseReluDense.*"
+
+# log_file_name=${model_name_or_path}_${side_pretrained_weight}_${file_name}_lr${lr}_${distillation_init}_ffn_take_first_merge_last
+# output_dir=${home_path}/data/outputs/${file_name}_4
+
+# for seed in 0
+# do
+
+# for task in "superglue-record"
+# do
+
+#     rm -rf ${output_dir}
+    
+#     CUDA_VISIBLE_DEVICES=$1 python run_seq2seq.py \
+#         --training_config_file configs/${file_name}.json \
+#         --task_name $task --eval_dataset_name $task --test_dataset_name $task \
+#         --seed ${seed}  \
+#         --num_train_epochs ${num_epochs[$task]} \
+#         --max_source_length ${max_source_length[$task]} \
+#         --per_device_train_batch_size ${batch_size[$task]} \
+#         --per_device_eval_batch_size ${batch_size[$task]} \
+#         --learning_rate ${lr} \
+#         --output_dir ${output_dir} \
+#         --side_pretrained_weight ${side_pretrained_weight} \
+#         --model_name_or_path ${model_name_or_path} \
+#         --tokenizer_name ${model_name_or_path} \
+#         --distilled_block_ids ${distilled_block_ids} \
+#         --distillation_init ${distillation_init} \
+#         --distilled_block_weights ${distilled_block_weights} \
+#         --modules_to_merge ${modules_to_merge}
+
+#     cp ${output_dir}/all_results.json  all_output_logs/${log_file_name}_$task@${seed}.json
+
+# done
+# done
+
+
+
+# side_pretrained_weight=6-768
+# model_name_or_path=t5-base
+# distillation_init="sum"
+# distilled_block_ids="[0,1,2,3,4,[5,6,7,8,9,10,11]]"
+# distilled_block_weights=None
+# modules_to_merge=".*Attention.*|.*layer_norm.*"
+
+# log_file_name=${model_name_or_path}_${side_pretrained_weight}_${file_name}_lr${lr}_${distillation_init}_attnLM_take_first_merge_last
+# output_dir=${home_path}/data/outputs/${file_name}_4
+
+# for seed in 0
+# do
+
+# for task in "superglue-record"
+# do
+
+#     rm -rf ${output_dir}
+    
+#     CUDA_VISIBLE_DEVICES=$1 python run_seq2seq.py \
+#         --training_config_file configs/${file_name}.json \
+#         --task_name $task --eval_dataset_name $task --test_dataset_name $task \
+#         --seed ${seed}  \
+#         --num_train_epochs ${num_epochs[$task]} \
+#         --max_source_length ${max_source_length[$task]} \
+#         --per_device_train_batch_size ${batch_size[$task]} \
+#         --per_device_eval_batch_size ${batch_size[$task]} \
+#         --learning_rate ${lr} \
+#         --output_dir ${output_dir} \
+#         --side_pretrained_weight ${side_pretrained_weight} \
+#         --model_name_or_path ${model_name_or_path} \
+#         --tokenizer_name ${model_name_or_path} \
+#         --distilled_block_ids ${distilled_block_ids} \
+#         --distillation_init ${distillation_init} \
+#         --distilled_block_weights ${distilled_block_weights} \
+#         --modules_to_merge ${modules_to_merge}
+
+#     cp ${output_dir}/all_results.json  all_output_logs/${log_file_name}_$task@${seed}.json
+
+# done
+# done
+
+
+# modules_to_merge=".*Attention.*"
+
+# log_file_name=${model_name_or_path}_${side_pretrained_weight}_${file_name}_lr${lr}_${distillation_init}_attn_take_first_merge_last
+# output_dir=${home_path}/data/outputs/${file_name}_4
+
+# for seed in 0
+# do
+
+# for task in "superglue-record"
+# do
+
+#     rm -rf ${output_dir}
+    
+#     CUDA_VISIBLE_DEVICES=$1 python run_seq2seq.py \
+#         --training_config_file configs/${file_name}.json \
+#         --task_name $task --eval_dataset_name $task --test_dataset_name $task \
+#         --seed ${seed}  \
+#         --num_train_epochs ${num_epochs[$task]} \
+#         --max_source_length ${max_source_length[$task]} \
+#         --per_device_train_batch_size ${batch_size[$task]} \
+#         --per_device_eval_batch_size ${batch_size[$task]} \
+#         --learning_rate ${lr} \
+#         --output_dir ${output_dir} \
+#         --side_pretrained_weight ${side_pretrained_weight} \
+#         --model_name_or_path ${model_name_or_path} \
+#         --tokenizer_name ${model_name_or_path} \
+#         --distilled_block_ids ${distilled_block_ids} \
+#         --distillation_init ${distillation_init} \
+#         --distilled_block_weights ${distilled_block_weights} \
+#         --modules_to_merge ${modules_to_merge}
+
+#     cp ${output_dir}/all_results.json  all_output_logs/${log_file_name}_$task@${seed}.json
+
+# done
+# done

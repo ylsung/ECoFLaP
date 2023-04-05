@@ -593,7 +593,7 @@ class SuperGLUERecord(SUPERGLUE):
             # duplicates the samples based on  number of answers.
             num_answers = len(ex["answers"])
             new_batch["source"].extend([inputs]) 
-            new_batch["target"].extend([ex["answers"][0]] if num_answers > 1 else ["<unk>"])
+            new_batch["target"].extend([ex["answers"][0]] if num_answers > 0 else ["<unk>"])
             new_batch["extra_fields"].extend([{"idx": ex["idx"], "answers": ex["answers"], "task": self.name}]) 
         return new_batch
     

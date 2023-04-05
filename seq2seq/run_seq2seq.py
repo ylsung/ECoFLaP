@@ -297,6 +297,8 @@ def main():
                 load_from_cache_file=not data_args.overwrite_cache,
             )
         train_dataset = concatenate_datasets(train_datasets)
+
+        print(len(train_dataset))
    
     if training_args.do_eval:
         eval_datasets = {eval_dataset: AutoTask.get(eval_dataset, eval_dataset_config,
@@ -318,7 +320,7 @@ def main():
                     load_from_cache_file=not data_args.overwrite_cache,
             )
 
-            # print(len(eval_datasets[name]))
+            print(len(eval_datasets[name]))
 
     if training_args.do_test:
         test_datasets = {test_dataset: AutoTask.get(test_dataset, test_dataset_config,
@@ -340,8 +342,9 @@ def main():
                     load_from_cache_file=not data_args.overwrite_cache,
             )
 
-            # print(len(test_datasets[name]))
+            print(len(test_datasets[name]))
 
+    # exit()
 
     # Data collator
     label_pad_token_id = -100 if data_args.ignore_pad_token_for_loss else tokenizer.pad_token_id

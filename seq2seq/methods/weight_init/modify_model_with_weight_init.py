@@ -19,6 +19,7 @@ from transformers import AutoTokenizer
 from collections import defaultdict
 
 from seq2seq.methods.weight_init.learnable_merge import t5_modify_for_learnable_merge, convert_to_normal_save_weights
+from seq2seq.methods.git_rebasin.weight_matching import permute_based_on_first_layer, permute_based_on_block
 
 
 def get_activations(transformer, sampled_loader, distilled_block_ids, cache_type="representations"):
@@ -726,8 +727,13 @@ def t5_modify_with_weight_init(transformer, petl_config, sampled_loader=None):
 
         print(transformer.config.num_layers, side_config.num_layers)
 
-        # sequential
-        # [[0,1,2,3],[4,5,6,7],[8,9,10,11]]
+        if petl_config.permute_before_merge:
+            print("Start permutation (based on the first layer)...")
+            transformer = permute_based_on_first_layer(transformer)
+
+        elif petl_config.permute_on_block_before_merge:
+            print("Start permutation (based on block)...")
+            transformer = permute_based_on_block(transformer, eval(petl_config.distilled_block_ids))
 
         weights = None
 
@@ -825,12 +831,14 @@ if __name__ == "__main__":
 
             self.side_pretrained_weight = "6-768"
             self.distillation_init = "sum"
-            self.distilled_block_ids = "[0,1,2,3,4,[5,6,7,8,9,10,11]]"
+            self.distilled_block_ids = "[[0,1,2,3],[2,3,4,5],[4,5,6,7],[6,7,8,9],[8,9,10,11],[10,11]]" # "[0,1,2,3,4,[5,6,7,8,9,10,11]]" # "[[0,1],[2,3],[4,5],[6,7],[8,9],[10,11]]" "[0,1,2,[3,4,5],[6,7,8],[9,10,11]]"
             self.distilled_block_weights = None
             self.rep_stack_forward = True
             self.scaling_factor = 1.0
             self.learnable_weight_type = "scalar-shared"
-            self.modules_to_merge = ".*layer_norm.*|.*DenseReluDense.*"
+            self.modules_to_merge = ".*|.*" # ".*layer_norm.*|.*DenseReluDense.*" # ".*|.*" 
+            self.permute_before_merge = False
+            self.permute_on_block_before_merge = True
 
     config = AdapterConfig(args.adapter_type)
     model = AutoModelForSeq2SeqLM.from_pretrained("t5-base")
@@ -874,7 +882,7 @@ if __name__ == "__main__":
             labels=target_seq.input_ids[:, 1:],
         )
 
-    generation_input_ids = tokenizer(["translate English to German: The house is wonderful."], return_tensors="pt")
+    generation_input_ids = tokenizer(["translate English to German: The house is wonderful, and the garden is really big too. Therefore, I like the house in general."], return_tensors="pt")
     old_generation_outputs = model.generate(**generation_input_ids, num_beams=1)
 
 

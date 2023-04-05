@@ -53,6 +53,24 @@ batch_size["superglue-record"]=100
 batch_size["squad_v2"]=32
 batch_size["winogrande_debiased"]=100
 
+declare -A learning_rate
+learning_rate["rte"]=3e-4
+learning_rate["qnli"]=3e-4
+learning_rate["mnli"]=3e-4
+learning_rate["cola"]=3e-4
+learning_rate["sst2"]=3e-4
+learning_rate["mrpc"]=3e-4
+learning_rate["qqp"]=3e-4
+learning_rate["stsb"]=3e-4
+learning_rate["superglue-boolq"]=3e-4
+learning_rate["superglue-multirc"]=3e-4
+learning_rate["superglue-wic"]=3e-4
+learning_rate["superglue-cb"]=1e-3
+learning_rate["superglue-copa"]=3e-4
+learning_rate["superglue-record"]=3e-4
+learning_rate["squad_v2"]=3e-4
+learning_rate["winogrande_debiased"]=3e-4
+
 # declare -A wwwwww
 # wwwwww["rte"]=zzz
 # wwwwww["qnli"]=zzz
@@ -68,6 +86,5 @@ batch_size["winogrande_debiased"]=100
 # wwwwww["superglue-cb"]=zzz
 # wwwwww["superglue-copa"]=zzz
 # wwwwww["superglue-record"]=zzz
-
-
-
+# wwwwww["squad_v2"]=zzz
+# wwwwww["winogrande_debiased"]=zzz

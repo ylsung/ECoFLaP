@@ -300,3 +300,6 @@ class PETLModelArguments:
     scaling_factor: float = field(default=1, metadata={"help": "The scaling factor for RegMean type of methods."})
     learnable_weight_type: str = field(default="scalar-shared", metadata={"help": "The type of the learnable merge weights."})
     modules_to_merge: str = field(default=".*", metadata={"help": "The type of modules to merge."})
+
+    permute_before_merge: bool = field(default=False, metadata={"help": "Whether to permute the layers before merging (permute based on the first layer)"})
+    permute_on_block_before_merge: bool = field(default=False, metadata={"help": "Whether to permute the layers before merging (permute independently based on blocks)"})
