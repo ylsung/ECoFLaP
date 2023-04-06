@@ -705,6 +705,10 @@ def weights_multiplication_from_different_layers(weights_to_distill, target_name
 
 def t5_modify_with_weight_init(transformer, petl_config, sampled_loader=None):
 
+    device = list(transformer.parameters())[0].device
+
+    transformer.to("cpu")
+
     if petl_config.side_pretrained_weight is not None:
 
         side_config = deepcopy(transformer.config)
@@ -793,8 +797,11 @@ def t5_modify_with_weight_init(transformer, petl_config, sampled_loader=None):
                     petl_config.learnable_weight_type
                 )
 
+        distilled_transformer.to(device)
+
         return distilled_transformer
     
+    transformer.to(device)
     return transformer
 
 

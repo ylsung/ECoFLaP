@@ -81,14 +81,14 @@ def parse_args():
 
     parser.add_argument(
         "--permute_before_merge",
-        type=bool,
+        action="store_true",
         default=False,
         help="Whether to permute the layers before merging (permute based on the first layer)"
     )
 
     parser.add_argument(
         "--permute_on_block_before_merge",
-        type=bool,
+        action="store_true",
         default=False,
         help="Whether to permute the layers before merging (permute independently based on blocks)"
     )
@@ -122,10 +122,9 @@ def main():
     # allow auto-dl completes on main process without timeout when using NCCL backend.
     # os.environ["NCCL_BLOCKING_WAIT"] = "1"
 
-    # set before init_distributed_mode() to ensure the same job_id shared across all ranks.
-
     args = parse_args()
 
+    # set before init_distributed_mode() to ensure the same job_id shared across all ranks.
     if args.job_id is not None:
         job_id = args.job_id
     else:

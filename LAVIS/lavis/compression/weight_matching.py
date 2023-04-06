@@ -230,7 +230,8 @@ def permute_based_on_first_layer(transformer):
         **{f"encoder.block.0.layer.0.SelfAttention.v.weight.{i}": (f"P_self_vo_{i}", None) for i in range(num_heads)},                                                                                                 
         **{f"encoder.block.0.layer.0.SelfAttention.o.weight.{i}": (None, f"P_self_vo_{i}") for i in range(num_heads)},                                                                                                 
         **{"encoder.block.0.layer.0.layer_norm.weight": (None,)},                                                                                                      
-        **{"encoder.block.0.layer.1.DenseReluDense.wi.weight": ("P_ffn", None)},                                                                                               
+        **{"encoder.block.0.layer.1.DenseReluDense.wi_0.weight": ("P_ffn", None)},
+        **{"encoder.block.0.layer.1.DenseReluDense.wi_1.weight": ("P_ffn", None)},                                                                                                
         **{"encoder.block.0.layer.1.DenseReluDense.wo.weight": (None, "P_ffn")},                                                                                               
         **{"encoder.block.0.layer.1.layer_norm.weight": (None,)},
     })
@@ -246,7 +247,8 @@ def permute_based_on_first_layer(transformer):
         **{f"decoder.block.0.layer.1.EncDecAttention.v.weight.{i}": (f"P_cross_vo_{i}", None) for i in range(num_heads)},                                                                                               
         **{f"decoder.block.0.layer.1.EncDecAttention.o.weight.{i}": (None, f"P_cross_vo_{i}") for i in range(num_heads)},                                                                                               
         **{"decoder.block.0.layer.1.layer_norm.weight": (None,)},                                                                                                      
-        **{"decoder.block.0.layer.2.DenseReluDense.wi.weight": ("P_ffn", None)},                                                                                               
+        **{"decoder.block.0.layer.2.DenseReluDense.wi_0.weight": ("P_ffn", None)},   
+        **{"decoder.block.0.layer.2.DenseReluDense.wi_1.weight": ("P_ffn", None)},                                                                                                
         **{"decoder.block.0.layer.2.DenseReluDense.wo.weight": (None, "P_ffn")},                                                                                               
         **{"decoder.block.0.layer.2.layer_norm.weight": (None,)},
     })
@@ -369,7 +371,8 @@ def permute_based_on_block(transformer, distilled_block_ids):
         **{f"encoder.block.0.layer.0.SelfAttention.v.weight.{i}": (f"P_self_vo_{i}", None) for i in range(num_heads)},                                                                                                 
         **{f"encoder.block.0.layer.0.SelfAttention.o.weight.{i}": (None, f"P_self_vo_{i}") for i in range(num_heads)},                                                                                                 
         **{"encoder.block.0.layer.0.layer_norm.weight": (None,)},                                                                                                      
-        **{"encoder.block.0.layer.1.DenseReluDense.wi.weight": ("P_ffn", None)},                                                                                               
+        **{"encoder.block.0.layer.1.DenseReluDense.wi_0.weight": ("P_ffn", None)},
+        **{"encoder.block.0.layer.1.DenseReluDense.wi_1.weight": ("P_ffn", None)},                                                                                              
         **{"encoder.block.0.layer.1.DenseReluDense.wo.weight": (None, "P_ffn")},                                                                                               
         **{"encoder.block.0.layer.1.layer_norm.weight": (None,)},
     })
@@ -385,7 +388,8 @@ def permute_based_on_block(transformer, distilled_block_ids):
         **{f"decoder.block.0.layer.1.EncDecAttention.v.weight.{i}": (f"P_cross_vo_{i}", None) for i in range(num_heads)},                                                                                               
         **{f"decoder.block.0.layer.1.EncDecAttention.o.weight.{i}": (None, f"P_cross_vo_{i}") for i in range(num_heads)},                                                                                               
         **{"decoder.block.0.layer.1.layer_norm.weight": (None,)},                                                                                                      
-        **{"decoder.block.0.layer.2.DenseReluDense.wi.weight": ("P_ffn", None)},                                                                                               
+        **{"decoder.block.0.layer.2.DenseReluDense.wi_0.weight": ("P_ffn", None)},      
+        **{"decoder.block.0.layer.2.DenseReluDense.wi_1.weight": ("P_ffn", None)},                                                                                             
         **{"decoder.block.0.layer.2.DenseReluDense.wo.weight": (None, "P_ffn")},                                                                                               
         **{"decoder.block.0.layer.2.layer_norm.weight": (None,)},
     })
