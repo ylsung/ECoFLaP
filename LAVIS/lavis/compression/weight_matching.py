@@ -71,6 +71,9 @@ def get_permuted_param(ps, perm, k: str, params, except_axis=None):
     """Get parameter `k` from `params`, with the permutations applied."""
     w = params[k]
     for axis, p in enumerate(ps.axes_to_perm[k]):
+
+        # print("in")
+        # print(except_axis, axis, p, k)
         # Skip the axis we're trying to permute.
         if axis == except_axis:
             continue

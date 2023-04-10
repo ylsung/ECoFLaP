@@ -473,6 +473,8 @@ class RunnerBase:
                 val_result=results,
                 split_name=split_name,
                 epoch=cur_epoch,
+                orig_total_size=getattr(self, "orig_total_size", 0),
+                distilled_total_size=getattr(self, "distilled_total_size", 0),
             )
 
     def unwrap_dist_model(self, model):

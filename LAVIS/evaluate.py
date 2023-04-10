@@ -145,7 +145,15 @@ def main():
     datasets = task.build_datasets(cfg)
     model = task.build_model(cfg)
 
+    orig_total_size = sum(
+        param.numel() for param in model.parameters()
+    )
+
     model.t5_model = t5_modify_with_weight_init(model.t5_model, args)
+
+    distilled_total_size = sum(
+        param.numel() for param in model.parameters()
+    )
 
     for name, param in model.t5_model.named_parameters():
         param.requires_grad = False
@@ -153,6 +161,10 @@ def main():
     runner = RunnerBase(
         cfg=cfg, job_id=job_id, task=task, model=model, datasets=datasets
     )
+
+    runner.orig_total_size = orig_total_size
+    runner.distilled_total_size = distilled_total_size
+
     runner.evaluate(skip_reload=True)
 
 

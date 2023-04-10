@@ -20,7 +20,7 @@ from collections import defaultdict
 
 from lavis.compression.learnable_merge import t5_modify_for_learnable_merge, convert_to_normal_save_weights
 from lavis.compression.weight_matching import permute_based_on_first_layer, permute_based_on_block
-
+from lavis.compression.structural_pruning import pruning, get_pruned_dim
 
 def get_activations(transformer, sampled_loader, distilled_block_ids, cache_type="representations"):
     assert cache_type in ["representations", "input_gram", "input_output_gram"]
@@ -713,13 +713,17 @@ def t5_modify_with_weight_init(transformer, petl_config, sampled_loader=None):
 
         side_config = deepcopy(transformer.config)
 
-        num_layers, d_model = petl_config.side_pretrained_weight.split("-")
+        num_layers, res_keep_ratio, attn_keep_ratio, ffn_keep_ratio = petl_config.side_pretrained_weight.split("-")
 
         num_layers = int(num_layers)
-        d_model = int(d_model)
+        res_keep_ratio, attn_keep_ratio, ffn_keep_ratio = float(res_keep_ratio), float(attn_keep_ratio), float(ffn_keep_ratio)
 
         side_config.num_decoder_layers = num_layers
         side_config.num_layers = num_layers
+
+        side_config.d_model = get_pruned_dim(side_config.d_model, res_keep_ratio)
+        side_config.d_ff = get_pruned_dim(side_config.d_ff, ffn_keep_ratio)
+        side_config.d_kv = get_pruned_dim(side_config.d_kv, attn_keep_ratio)
 
         distilled_transformer = transformer.__class__(side_config)
 
@@ -797,6 +801,15 @@ def t5_modify_with_weight_init(transformer, petl_config, sampled_loader=None):
                     petl_config.learnable_weight_type
                 )
 
+            if "mag_prune" in petl_config.distillation_init:
+                distilled_transformer = pruning(
+                    transformer, 
+                    distilled_transformer, 
+                    res_keep_ratio, 
+                    attn_keep_ratio, 
+                    ffn_keep_ratio
+                )
+
         distilled_transformer.to(device)
 
         return distilled_transformer
@@ -834,8 +847,8 @@ if __name__ == "__main__":
             self.hard_prompt = None # "Find the relationship between the two concatenated sentences, or classify it if there is only one sentence."
             self.init_from_emb = True
 
-            self.side_pretrained_weight = "6-768"
-            self.distillation_init = "sum"
+            self.side_pretrained_weight = "12-1.0-1.0-1.0"
+            self.distillation_init = "mag_prune"
             self.distilled_block_ids = "[[0,1,2,3],[2,3,4,5],[4,5,6,7],[6,7,8,9],[8,9,10,11],[10,11]]" # "[0,1,2,3,4,[5,6,7,8,9,10,11]]" # "[[0,1],[2,3],[4,5],[6,7],[8,9],[10,11]]" "[0,1,2,[3,4,5],[6,7,8],[9,10,11]]"
             self.distilled_block_weights = None
             self.rep_stack_forward = True
@@ -843,11 +856,17 @@ if __name__ == "__main__":
             self.learnable_weight_type = "scalar-shared"
             self.modules_to_merge = ".*|.*" # ".*layer_norm.*|.*DenseReluDense.*" # ".*|.*" 
             self.permute_before_merge = False
-            self.permute_on_block_before_merge = True
+            self.permute_on_block_before_merge = False
 
     config = AdapterConfig(args.adapter_type)
-    model = AutoModelForSeq2SeqLM.from_pretrained("t5-base")
-    tokenizer = AutoTokenizer.from_pretrained("t5-base")
+    model = AutoModelForSeq2SeqLM.from_pretrained("t5-base") # google/flan-t5-xl
+    tokenizer = AutoTokenizer.from_pretrained("t5-base") # google/flan-t5-xl
+
+    
+    for name, _ in model.state_dict().items():
+        if "block" not in name:
+            print(name)
+
 
     # input_seq = tokenizer(
     #     ["Applies a linear transformation to the incoming data.", "Parameters: in_features - size of each input sample. out_features - size of each output sample."],
