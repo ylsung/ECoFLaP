@@ -26,13 +26,13 @@ random.seed(0)
 
 num_layers = 24
 
-left_num_layers = 12
+left_num_layers = 20
 
 total = 0
 
 selected = []
 
-num_samples = 60
+num_samples = 50
 
 
 selected = [sorted(random.sample(range(1, num_layers), num_layers - left_num_layers)) for _ in range(num_samples)]
@@ -73,12 +73,12 @@ for s in selected:
 
     print(distilled_block_ids)
 
-    job_id = "merge_ffnLN_" + conver_list_str(s)
+    job_id = "drop_4_" + conver_list_str(s)
 
     print(job_id)
 
-    program = (f"python -m torch.distributed.run --nproc_per_node=4 evaluate.py"
-    f" --cfg-path lavis/projects/blip2/eval/vqav2_zeroshot_flant5xl_eval.yaml --side_pretrained_weight 22-2048"
+    program = (f"python -m torch.distributed.run --nproc_per_node=2 evaluate.py"
+    f" --cfg-path lavis/projects/blip2/eval/vqav2_zeroshot_flant5xl_eval.yaml --side_pretrained_weight '{left_num_layers}-1.0-1.0-1.0'"
     f" --distilled_block_ids '{distilled_block_ids}' --job_id '{job_id}'")
 
     print(program)

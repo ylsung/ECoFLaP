@@ -255,6 +255,12 @@ class VisionTransformer(nn.Module):
         self.image_size = img_size
         self.num_classes = num_classes
         self.num_features = self.embed_dim = embed_dim  # num_features for consistency with other models
+        self.depth = depth
+        self.mlp_ratio = mlp_ratio
+        self.num_heads = num_heads
+        self.img_size = img_size
+        self.patch_size = patch_size
+        self.drop_path_rate = drop_path_rate
 
         self.patch_embed = PatchEmbed(
             img_size=img_size, patch_size=patch_size, in_chans=in_chans, embed_dim=embed_dim)

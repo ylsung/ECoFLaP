@@ -2,6 +2,7 @@ import re
 import random
 import torch
 import torch.nn as nn
+from functools import partial
 import numpy as np
 from copy import deepcopy
 from scipy.optimize import linear_sum_assignment
@@ -10,6 +11,9 @@ from collections import defaultdict
 from typing import NamedTuple
 
 from lavis.compression.weight_matching import permutation_spec_from_axes_to_perm, get_permuted_param, apply_permutation
+from lavis.models.blip2_models.blip2 import LayerNorm, disabled_train, Blip2Base
+
+from lavis.models.eva_vit import convert_weights_to_fp16
 
 
 def get_pruned_dim(dim, keep_ratio):
@@ -43,21 +47,6 @@ def structural_pruning(ps, params_a, keep_ratio_dict, max_iter=100, silent=True)
                 # print(perm[p].shape)
     
                 w_a = get_permuted_param(ps, perm, wk, params_a, except_axis=axis)
-
-                # print(wk)
-                # print(w_a.shape)
-
-                # print(wk)
-                # print("old")
-                # if len(w_a.shape) == 1:
-                #     w_a = w_a.unsqueeze(-1)
-                #     A += torch.norm(w_a, dim=-1)
-                #     print(torch.norm(w_a, dim=-1) ** 2)
-                # else:
-                #     A += torch.norm(w_a.T, dim=axis)
-
-                #     print(w_a.shape)
-                #     print(torch.norm(w_a.T, dim=axis) ** 2)
 
                 w_a = torch.moveaxis(w_a, axis, 0).reshape((n, -1)).float()
 
@@ -151,33 +140,65 @@ def get_ps(config):
     return ps
 
 
-def pruning(transformer, distilled_transformer, res_keep_ratio, attn_keep_ratio, ffn_keep_ratio):
-    state_dict = transformer.state_dict()
+def get_vit_ps(num_layers, num_heads):
+    ps_dict = {
+        "cls_token": (None, None, "P_vit_res"),
+        "pos_embed": (None, None, "P_vit_res"),
+        "patch_embed.proj.weight": ("P_vit_res", None, None),
+        "patch_embed.proj.bias": ("P_vit_res",),
+        **{f"blocks.{j}.norm1.weight": ("P_vit_res",) for j in range(num_layers)},
+        **{f"blocks.{j}.norm1.bias": ("P_vit_res",) for j in range(num_layers)},
+        # **{f"visual_encoder.blocks.{j}.attn.q.weight.{i}": (f"P_vit_self_qk_{j}_{i}", "P_vit_res") for i in range(num_heads) for j in range(num_layers)},
+        # **{f"visual_encoder.blocks.{j}.attn.k.weight.{i}": (f"P_vit_self_qk_{j}_{i}", "P_vit_res") for i in range(num_heads) for j in range(num_layers)},
+        # **{f"visual_encoder.blocks.{j}.attn.q_bias.{i}": (f"P_vit_self_qk_{j}_{i}",) for i in range(num_heads) for j in range(num_layers)},
+        # **{f"visual_encoder.blocks.{j}.attn.v.weight.{i}": (f"P_vit_self_vo_{j}_{i}", "P_vit_res") for i in range(num_heads) for j in range(num_layers)},
+        # **{f"visual_encoder.blocks.{j}.attn.v_bias.{i}": (f"P_vit_self_vo_{j}_{i}",) for i in range(num_heads) for j in range(num_layers)},
+        # **{f"visual_encoder.blocks.{j}.attn.proj.weight.{i}": ("P_vit_res", f"P_vit_self_vo_{j}_{i}") for i in range(num_heads) for j in range(num_layers)},
+        # **{f"visual_encoder.blocks.{j}.attn.proj.bias.{i}": ("P_vit_res",) for i in range(num_heads) for j in range(num_layers)},
+        **{f"blocks.{j}.attn.qkv.weight": (None, "P_vit_res") for j in range(num_layers)},
+        **{f"blocks.{j}.attn.q_bias": (None,) for j in range(num_layers)},
+        **{f"blocks.{j}.attn.v_bias": (None,) for j in range(num_layers)},
+        **{f"blocks.{j}.attn.proj.weight": ("P_vit_res", None) for j in range(num_layers)},
+        **{f"blocks.{j}.attn.proj.bias": ("P_vit_res",) for j in range(num_layers)},
 
-    encoder_layers = transformer.config.num_layers
-    decoder_layers = transformer.config.num_decoder_layers
-    num_heads = transformer.config.num_heads
-
-    layers_with_heads = {
-        "encoder": [
-            "encoder.block.{}.layer.0.SelfAttention.q.weight",
-            "encoder.block.{}.layer.0.SelfAttention.k.weight",
-            "encoder.block.{}.layer.0.SelfAttention.v.weight",
-            "encoder.block.{}.layer.0.SelfAttention.o.weight",
-        ],
-        "decoder": [
-            "decoder.block.{}.layer.0.SelfAttention.q.weight",
-            "decoder.block.{}.layer.0.SelfAttention.k.weight",
-            "decoder.block.{}.layer.0.SelfAttention.v.weight",
-            "decoder.block.{}.layer.0.SelfAttention.o.weight",
-            "decoder.block.{}.layer.1.EncDecAttention.q.weight",
-            "decoder.block.{}.layer.1.EncDecAttention.k.weight",
-            "decoder.block.{}.layer.1.EncDecAttention.v.weight",
-            "decoder.block.{}.layer.1.EncDecAttention.o.weight",
-        ]
+        **{f"blocks.{j}.norm2.weight": ("P_vit_res",) for j in range(num_layers)},
+        **{f"blocks.{j}.norm2.bias": ("P_vit_res",) for j in range(num_layers)},
+        **{f"blocks.{j}.mlp.fc1.weight": (f"P_vit_ffn_{j}", "P_vit_res") for j in range(num_layers)},
+        **{f"blocks.{j}.mlp.fc1.bias": (f"P_vit_ffn_{j}",) for j in range(num_layers)},
+        **{f"blocks.{j}.mlp.fc2.weight": ("P_vit_res", f"P_vit_ffn_{j}") for j in range(num_layers)},
+        **{f"blocks.{j}.mlp.fc2.bias": ("P_vit_res",) for j in range(num_layers)},
     }
 
-    ps = get_ps(transformer.config)
+    # print(ps_dict)
+
+    return ps_dict
+
+
+def v_pruning(visual_encoder, res_keep_ratio, attn_keep_ratio, ffn_keep_ratio, freeze_vit, precision):
+    device = list(visual_encoder.parameters())[0].device
+    visual_encoder.to("cpu")
+
+    state_dict = visual_encoder.state_dict()
+
+    num_layers = visual_encoder.depth
+    num_heads = visual_encoder.num_heads
+
+    distilled_vit = visual_encoder.__class__(
+        img_size=visual_encoder.img_size,
+        patch_size=visual_encoder.patch_size,
+        use_mean_pooling=False,
+        embed_dim=visual_encoder.embed_dim,
+        depth=visual_encoder.depth,
+        num_heads=visual_encoder.num_heads,
+        mlp_ratio=visual_encoder.mlp_ratio * ffn_keep_ratio,
+        qkv_bias=True,
+        drop_path_rate=visual_encoder.drop_path_rate,
+        norm_layer=partial(nn.LayerNorm, eps=1e-6),
+        use_checkpoint=visual_encoder.use_checkpoint,
+    )
+
+    ps_dict = get_vit_ps(num_layers, num_heads)
+    ps = permutation_spec_from_axes_to_perm(ps_dict)
 
     keep_ratio_dict = {}
     for p, axes in ps.perm_to_axes.items():
@@ -195,24 +216,24 @@ def pruning(transformer, distilled_transformer, res_keep_ratio, attn_keep_ratio,
     state_dict_with_split_heads = {}
 
     ignore_layers = [
-        "encoder.block.0.layer.0.SelfAttention.relative_attention_bias.weight",
-        "decoder.block.0.layer.0.SelfAttention.relative_attention_bias.weight"
+        # "encoder.block.0.layer.0.SelfAttention.relative_attention_bias.weight",
+        # "decoder.block.0.layer.0.SelfAttention.relative_attention_bias.weight"
     ]
 
-    for k, v in state_dict.items():
-        if "Attention" in k and k not in ignore_layers:
-            if k.endswith("o.weight"):
-                weight_chunks = torch.chunk(v, num_heads, dim=1)
-            else:
-                weight_chunks = torch.chunk(v, num_heads, dim=0)
+    # for k, v in state_dict.items():
+    #     if "Attention" in k and k not in ignore_layers:
+    #         if k.endswith("o.weight"):
+    #             weight_chunks = torch.chunk(v, num_heads, dim=1)
+    #         else:
+    #             weight_chunks = torch.chunk(v, num_heads, dim=0)
 
-            for chunk_id in range(len(weight_chunks)):
-                chunk_k = k + f".{chunk_id}"
-                state_dict_with_split_heads[chunk_k] = weight_chunks[chunk_id]
-        else:
-            state_dict_with_split_heads[k] = v
+    #         for chunk_id in range(len(weight_chunks)):
+    #             chunk_k = k + f".{chunk_id}"
+    #             state_dict_with_split_heads[chunk_k] = weight_chunks[chunk_id]
+    #     else:
+    #         state_dict_with_split_heads[k] = v
 
-    state_dict = state_dict_with_split_heads
+    # state_dict = state_dict_with_split_heads
 
     perm = structural_pruning(ps, state_dict, keep_ratio_dict, max_iter=100, silent=True)
 
@@ -225,111 +246,67 @@ def pruning(transformer, distilled_transformer, res_keep_ratio, attn_keep_ratio,
 
     pruned_state_dict.update(ignore_layers_weights)
 
-    # combine the weights of attention
+    # # combine the weights of attention
 
-    for module_type in ["encoder", "decoder"]:
-        if module_type == "encoder":
-            num_layers = encoder_layers
-        else:
-            num_layers = decoder_layers
+    # for module_type in ["encoder", "decoder"]:
+    #     if module_type == "encoder":
+    #         num_layers = encoder_layers
+    #     else:
+    #         num_layers = decoder_layers
 
-        for i in range(num_layers):
-            for layer_with_heads in layers_with_heads[module_type]:
-                weights = []
-                new_layer_with_heads = layer_with_heads.format(i)
-                for head_idx in range(num_heads):
-                    layer_with_heads_this_head = new_layer_with_heads + f".{head_idx}"
-                    weights.append(pruned_state_dict[layer_with_heads_this_head])
+    #     for i in range(num_layers):
+    #         for layer_with_heads in layers_with_heads[module_type]:
+    #             weights = []
+    #             new_layer_with_heads = layer_with_heads.format(i)
+    #             for head_idx in range(num_heads):
+    #                 layer_with_heads_this_head = new_layer_with_heads + f".{head_idx}"
+    #                 weights.append(pruned_state_dict[layer_with_heads_this_head])
 
-                if new_layer_with_heads.endswith("o.weight"):
-                    pruned_state_dict[new_layer_with_heads] = torch.cat(weights, dim=1)
-                else:
-                    pruned_state_dict[new_layer_with_heads] = torch.cat(weights, dim=0)
+    #             if new_layer_with_heads.endswith("o.weight"):
+    #                 pruned_state_dict[new_layer_with_heads] = torch.cat(weights, dim=1)
+    #             else:
+    #                 pruned_state_dict[new_layer_with_heads] = torch.cat(weights, dim=0)
 
-                for head_idx in range(num_heads):
-                    layer_with_heads_this_head = new_layer_with_heads + f".{head_idx}"
+    #             for head_idx in range(num_heads):
+    #                 layer_with_heads_this_head = new_layer_with_heads + f".{head_idx}"
 
-                    del pruned_state_dict[layer_with_heads_this_head]
+    #                 del pruned_state_dict[layer_with_heads_this_head]
 
     
-    distilled_transformer.load_state_dict(pruned_state_dict)
+    distilled_vit.load_state_dict(pruned_state_dict)
 
-    return distilled_transformer
+    distilled_vit.to(device)
 
+    if precision == "fp16":
+#         model.to("cuda") 
+        convert_weights_to_fp16(distilled_vit)
 
+    if freeze_vit:
+        for name, param in distilled_vit.named_parameters():
+            param.requires_grad = False
+        distilled_vit = distilled_vit.eval()
+        distilled_vit.train = disabled_train
+        print("freeze distilled vision encoder")
+
+    return distilled_vit
 
 
 if __name__ == "__main__":
     import torch
     import torch.nn as nn
 
-
-    ps = permutation_spec_from_axes_to_perm(
-        {"l1.weight": ("P_res", None),
-         "l1.bias": ("P_res",),
-         "l2.weight": ("P_l2", "P_res"),
-         "l2.bias": ("P_l2",),
-         "l3.weight": ("P_res", "P_l2"),
-         "l3.bias": ("P_res",),
-         "l4.weight": (None, "P_res"),
-         "l4.bias": (None,),
-        }
+    x = torch.randn(2, 3, 224, 224)
+    visual_encoder, _ = Blip2Base.init_vision_encoder(
+        "eva_clip_g", 224, 0, False, "fp32"
     )
 
+    visual_encoder.eval()
 
-    class Model(nn.Module):
-        def __init__(self):
+    old_output = visual_encoder(x)
 
-            super().__init__()
+    visual_encoder = v_pruning(visual_encoder, 1.0, 1.0, 1.0, True, "fp32")
 
-            self.l1 = nn.Linear(6, 10)
-            self.l2 = nn.Linear(10, 6)
-            self.l3 = nn.Linear(6, 10)
-            self.l4 = nn.Linear(10, 6)
+    new_output = visual_encoder(x)
 
-        def forward(self, x):
-            return self.l3(x + self.l2(self.l1(x)))
-
-
-    model = Model()
-
-    param = model.state_dict()
-
-    perm = structural_pruning(ps, param, 0.5, max_iter=100, silent=False)
-
-
-    def total_norm(weights):
-        total = 0
-
-        for n, v in weights.items():
-            total += (v ** 2).sum().item()
-
-        return total
-
-    pruned_weights = apply_permutation(ps, perm, param)
-
-    print(perm)
-
-    print(pruned_weights)
-
-    selected_norm = total_norm(pruned_weights)
-
-    print(selected_norm)
-
-    print("Random")
-
-    biggest_random = 0
-    smallest_random = 1000
-    for i in range(10000):
-        random_perm = {'P_res': torch.randperm(10)[:5], 'P_l2': torch.randperm(6)[:3]}
-
-        random_pruned_weights = apply_permutation(ps, random_perm, param)
-
-        random_norm = total_norm(random_pruned_weights)
-
-        biggest_random = max(biggest_random, random_norm)
-
-        smallest_random = min(smallest_random, random_norm)
-
-    print(biggest_random, smallest_random)
+    print("diff: ", torch.mean((old_output - new_output) ** 2))
         

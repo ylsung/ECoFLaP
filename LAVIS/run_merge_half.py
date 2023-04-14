@@ -1,5 +1,3 @@
-
-
 import subprocess
 import random
 
@@ -26,16 +24,16 @@ random.seed(0)
 
 num_layers = 24
 
-left_num_layers = 12
+left_num_layers = 20
 
 total = 0
 
 selected = []
 
-num_samples = 60
+num_samples = 50
 
 
-selected = [sorted(random.sample(range(1, num_layers), left_num_layers)) for _ in range(num_samples)]
+selected = [sorted(random.sample(range(1, num_layers), num_layers - left_num_layers)) for _ in range(num_samples)]
 
 
 def get_merge_block_ids(selected_idx, num_layers):
@@ -68,42 +66,24 @@ for s in selected:
         continue
     distilled_block_ids = get_merge_block_ids(s, num_layers)
 
+    print(s)
+
+    print(distilled_block_ids)
+
     assert len(distilled_block_ids) == left_num_layers
     distilled_block_ids = conver_list_str(distilled_block_ids)
 
     print(distilled_block_ids)
 
-    job_id = "merge_ffnLN_" + conver_list_str(s)
+    job_id = "merge_ffnLN_4_" + conver_list_str(s)
 
     print(job_id)
 
-    program = (f"python -m torch.distributed.run --nproc_per_node=4 evaluate.py"
-    f" --cfg-path lavis/projects/blip2/eval/vqav2_zeroshot_flant5xl_eval.yaml --side_pretrained_weight 22-2048"
+    program = (f"python -m torch.distributed.run --nproc_per_node=2 --master_port 10493 evaluate.py"
+    f" --cfg-path lavis/projects/blip2/eval/vqav2_zeroshot_flant5xl_eval.yaml --side_pretrained_weight '{left_num_layers}-1.0-1.0-1.0'"
     f" --distilled_block_ids '{distilled_block_ids}' --job_id '{job_id}' --modules_to_merge '.*layer_norm.*|.*DenseReluDense.*'"
     f" --permute_on_block_before_merge")
 
     print(program)
     subprocess.call(program, shell=True)
 
-
-# for s in selected:
-#     if 0 in s:
-#         # in merge case, we will never merge 0 to 1, because it is the same as merge 1 to 0
-#         continue
-#     distilled_block_ids = get_merge_block_ids(s, num_layers)
-
-#     distilled_block_ids = conver_list_str(distilled_block_ids)
-
-#     print(distilled_block_ids)
-
-#     job_id = "merge_all_" + conver_list_str(s)
-
-#     print(job_id)
-
-#     program = (f"python -m torch.distributed.run --nproc_per_node=4 evaluate.py"
-#     f" --cfg-path lavis/projects/blip2/eval/vqav2_zeroshot_flant5xl_eval.yaml --side_pretrained_weight 22-2048"
-#     f" --distilled_block_ids '{distilled_block_ids}' --job_id '{job_id}' --modules_to_merge '.*|.*'"
-#     f" --permute_on_block_before_merge")
-
-#     print(program)
-#     subprocess.call(program, shell=True)

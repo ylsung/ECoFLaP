@@ -58,9 +58,13 @@ class Blip2T5(Blip2Base):
 
         self.tokenizer = self.init_tokenizer()
 
+        self.vit_model = vit_model
         self.visual_encoder, self.ln_vision = self.init_vision_encoder(
             vit_model, img_size, drop_path_rate, use_grad_checkpoint, vit_precision
         )
+
+        self.vit_precision = vit_precision
+        self.freeze_vit = freeze_vit
         if freeze_vit:
             for name, param in self.visual_encoder.named_parameters():
                 param.requires_grad = False

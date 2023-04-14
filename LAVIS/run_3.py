@@ -10,7 +10,7 @@ port = sys.argv[2]
 
 for ratio in [0.8, 0.7, 0.6]:
 
-    ratios = f"1.0-{ratio}-{ratio}"
+    ratios = f"1.0-{ratio}-1.0"
 
     job_id = f"mag_prune{ratios}"
 

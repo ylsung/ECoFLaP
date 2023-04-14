@@ -11,8 +11,11 @@ print(folders)
 
 for folder in folders:
     idx = folder.split("/")[-1]
-    with open(folder + "/evaluate.txt", "r") as f:
-        results = f.readlines()[0].strip()
 
-    print(idx, results)
+    try:
+        with open(folder + "/evaluate.txt", "r") as f:
+            results = f.readlines()[0].strip()
+            print(idx, results)
+    except:
+        print(f"{folder} has no evaluate file.")
 

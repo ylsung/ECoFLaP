@@ -2,7 +2,6 @@
 
 import subprocess
 import random
-
 import sys
 
 GPU = sys.argv[1]
@@ -10,7 +9,7 @@ port = sys.argv[2]
 
 for ratio in [0.8, 0.7, 0.6]:
 
-    ratios = f"1.0-{ratio}-{ratio}"
+    ratios = f"1.0-1.0-{ratio}"
 
     job_id = f"mag_prune{ratios}"
 

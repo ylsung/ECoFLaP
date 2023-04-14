@@ -122,8 +122,8 @@ class VQATask(BaseTask):
             remove_duplicate="question_id",
         )
 
-        orig_total_size = kwargs["orig_total_size"]
-        distilled_total_size = kwargs["distilled_total_size"]
+        self.orig_total_size = kwargs["orig_total_size"]
+        self.distilled_total_size = kwargs["distilled_total_size"]
 
         metrics = self._report_metrics(result_file=result_file, split=split_name)
 
@@ -150,8 +150,8 @@ class VQATask(BaseTask):
 
             # print accuracies
 
-            metrics["orig_size"] = f"{orig_total_size / 10 ** 9:.3f}B"
-            metrics["dist_size"] = f"{distilled_total_size / 10 ** 9:.3f}B"
+            metrics["orig_size"] = f"{self.orig_total_size / 10 ** 9:.3f}B"
+            metrics["dist_size"] = f"{self.distilled_total_size / 10 ** 9:.3f}B"
 
             overall_acc = vqa_scorer.accuracy["overall"]
             metrics["agg_metrics"] = overall_acc
