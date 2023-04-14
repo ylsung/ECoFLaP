@@ -32,7 +32,7 @@ run:
   task: vqa
   # optimization-specific
   batch_size_train: 16
-  batch_size_eval: 128
+  batch_size_eval: 100
   num_workers: 4
 
   # inference-specific

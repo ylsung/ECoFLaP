@@ -16,8 +16,8 @@ datasets:
               - https://storage.googleapis.com/sfr-vision-language-research/LAVIS/datasets/vqav2/vqa_train.json
               - https://storage.googleapis.com/sfr-vision-language-research/LAVIS/datasets/vqav2/vqa_val.json
           storage:
-              - /playpen/ylsung/data/coco/annotations/vqa_train.json
-              - /playpen/ylsung/data/coco/annotations/vqa_val.json
+              - /work/users/y/l/ylsung/data/coco/annotations/vqa_train.json
+              - /work/users/y/l/ylsung/data/coco/annotations/vqa_val.json
         val:
           url:
               # TODO make this order insensitive
@@ -26,16 +26,16 @@ datasets:
               - https://storage.googleapis.com/sfr-vision-language-research/LAVIS/datasets/vqav2/v2_OpenEnded_mscoco_val2014_questions.json
               - https://storage.googleapis.com/sfr-vision-language-research/LAVIS/datasets/vqav2/v2_mscoco_val2014_annotations.json
           storage:
-              - /playpen/ylsung/data/coco/annotations/vqa_val_eval.json
-              - /playpen/ylsung/data/coco/annotations/answer_list.json
-              - /playpen/ylsung/data/coco/annotations/v2_OpenEnded_mscoco_val2014_questions.json
-              - /playpen/ylsung/data/coco/annotations/v2_mscoco_val2014_annotations.json
+              - /work/users/y/l/ylsung/data/coco/annotations/vqa_val_eval.json
+              - /work/users/y/l/ylsung/data/coco/annotations/answer_list.json
+              - /work/users/y/l/ylsung/data/coco/annotations/v2_OpenEnded_mscoco_val2014_questions.json
+              - /work/users/y/l/ylsung/data/coco/annotations/v2_mscoco_val2014_annotations.json
         test:
           url:
               - https://storage.googleapis.com/sfr-vision-language-research/LAVIS/datasets/vqav2/vqa_test.json
               - https://storage.googleapis.com/sfr-vision-language-research/LAVIS/datasets/vqav2/answer_list.json
           storage:
-              - /playpen/ylsung/data/coco/annotations/vqa_test.json
-              - /playpen/ylsung/data/coco/annotations/answer_list.json
+              - /work/users/y/l/ylsung/data/coco/annotations/vqa_test.json
+              - /work/users/y/l/ylsung/data/coco/annotations/answer_list.json
       images:
-          storage: /playpen/ylsung/data/coco/images/
+          storage: /work/users/y/l/ylsung/data/coco/images/

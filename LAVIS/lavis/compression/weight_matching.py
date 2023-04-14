@@ -12,6 +12,111 @@ from collections import defaultdict
 
 from typing import NamedTuple
 
+import ot
+import numpy as np
+
+
+def normalize_vecs(vecs, eps=1e-9):
+    # borrow from https://github.com/sidak/otfusion/blob/eb73ad63905a8ac0b05e089e6ff8f7cbae803faf/ground_metric.py
+    norms = torch.norm(vecs, dim=-1, keepdim=True)
+    return vecs / (norms + eps)
+
+
+def get_uniform_T(len_a, len_b):
+
+    T_var = torch.full((len_b, len_a), 1/(len_b*len_a))
+
+    marginals = torch.ones(T_var.shape[1]) / T_var.shape[1]
+    marginals = torch.diag(1.0/(marginals + 1e-12))  # take inverse
+    # print(marginals)
+    T_var = torch.matmul(T_var, marginals)
+
+    return T_var.t() # (len_a, len_b)
+
+
+def ot_weight_fusion(ps, params_a, params_b, max_iter=100, exact=True, normalization=False, metric="dot", silent=True):
+    """Find a permutation of `params_b` to make them match `params_a`."""
+    perm_sizes = {p: params_a[axes[0][0]].shape[axes[0][1]] for p, axes in ps.perm_to_axes.items()}
+
+    the_other_perm_sizes = {p: params_b[axes[0][0]].shape[axes[0][1]] for p, axes in ps.perm_to_axes.items()}
+
+    if not silent:
+        print(perm_sizes)
+
+    perm = {p: get_uniform_T(n, the_other_perm_sizes[p]) for p, n in perm_sizes.items()}
+    perm_names = list(perm.keys())
+
+    for iteration in range(max_iter):
+        progress = False
+        for p_ix in torch.randperm(len(perm_names)):
+            p = perm_names[p_ix]
+            n = perm_sizes[p]
+            m = the_other_perm_sizes[p]
+
+            A = torch.zeros((m, n))
+            for wk, axis in ps.perm_to_axes[p]:
+                w_a = params_a[wk]
+                w_b = get_permuted_param_by_matrix(ps, perm, wk, params_b, except_axis=axis)
+                # print(p, w_a.shape, w_b.shape)
+                w_a = torch.moveaxis(w_a, axis, 0).reshape((n, -1))
+                w_b = torch.moveaxis(w_b, axis, 0).reshape((m, -1))
+                
+                # print(m, n)
+                if normalization:
+                    w_a = normalize_vecs(w_a)
+                    w_b = normalize_vecs(w_b)
+
+                if metric == "dot":
+                    A -= w_b @ w_a.T
+
+                elif metric == "l2":
+                    diff = w_b[:, None, :] - w_a[None, :, :] 
+                    distances = torch.sum(diff**2, dim=-1) # (m, n)
+
+                    A += distances
+            
+            mu = np.ones(m) / m
+            nu = np.ones(n) / n
+
+            if exact:
+                T = ot.emd(mu, nu, A.cpu().numpy())
+            else:
+                T = ot.bregman.sinkhorn(mu, nu, A.cpu().numpy(), reg=1e-2)
+
+            T_var = torch.from_numpy(T).float() # T: (m, n)
+
+            # print(T_var)
+
+            # print(A.shape, perm[p].shape, T_var.shape)
+
+            oldL = (A * perm[p].t()).mean()
+            newL = (A * T_var).mean()
+
+            # print(T_var.shape)
+
+            # print(T_var)
+
+            # print(T_var.sum(0), T_var.sum(1))
+
+            # normalization
+            marginals = torch.ones(T_var.shape[1]) / T_var.shape[1]
+            marginals = torch.diag(1.0/(marginals + 1e-12))  # take inverse
+            # print(marginals)
+            T_var = torch.matmul(T_var, marginals)
+
+            if not silent:
+                print(f"{iteration}/{p}: {newL - oldL}")
+            progress = progress or newL < oldL - 1e-12
+
+            perm[p] = T_var.t() # (n, m)
+
+            # perm[p] = get_T(torch.argmax(T_var, 0), T_var.t().shape)
+
+        if not progress:
+            break
+
+    return perm
+
 
 def weight_matching(ps, params_a, params_b, max_iter=100, init_perm=None, silent=True):
     """Find a permutation of `params_b` to make them match `params_a`."""
@@ -67,6 +172,40 @@ def permutation_spec_from_axes_to_perm(axes_to_perm: dict):
                 perm_to_axes[perm].append((wk, axis))
     return PermutationSpec(perm_to_axes=dict(perm_to_axes), axes_to_perm=axes_to_perm)
 
+
+def get_T(index, shape):
+    T = torch.zeros(*shape)
+    T[torch.arange(T.shape[0]), index] = 1
+    return T
+
+
+def get_permuted_param_by_matrix(ps, perm, k: str, params, except_axis=None):
+    """Get parameter `k` from `params`, with the permutations applied."""
+    w = params[k]
+    for axis, p in enumerate(ps.axes_to_perm[k]):
+
+        # print("in")
+        # print(except_axis, axis, p, k)
+        # Skip the axis we're trying to permute.
+        if axis == except_axis:
+            continue
+
+        # None indicates that there is no permutation relevant to that axis.
+        if p is not None:
+            T = perm[p].t()
+
+            # print(k, p, w.shape, T.shape)
+
+            w = torch.matmul(torch.transpose(w, axis, -1), T).transpose(-1, axis)
+
+    return w
+
+
+def apply_permutation_by_matrix(ps, perm, params):
+    """Apply a `perm` to `params`."""
+    return {k: get_permuted_param_by_matrix(ps, perm, k, params) for k in params.keys()}
+
+
 def get_permuted_param(ps, perm, k: str, params, except_axis=None):
     """Get parameter `k` from `params`, with the permutations applied."""
     w = params[k]
@@ -83,6 +222,7 @@ def get_permuted_param(ps, perm, k: str, params, except_axis=None):
             w = torch.index_select(w, axis, perm[p].int())
 
     return w
+
 
 def apply_permutation(ps, perm, params):
     """Apply a `perm` to `params`."""

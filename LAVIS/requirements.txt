@@ -26,3 +26,4 @@ tqdm
 transformers>=4.25.0,<4.27
 webdataset
 wheel
+POT

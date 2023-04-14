@@ -9,7 +9,7 @@ from collections import defaultdict
 
 from typing import NamedTuple
 
-from lavis.compression.weight_matching import permutation_spec_from_axes_to_perm, get_permuted_param, apply_permutation
+from lavis.compression.weight_matching import permutation_spec_from_axes_to_perm, get_permuted_param, apply_permutation, ot_weight_fusion, get_permuted_param_by_matrix, apply_permutation_by_matrix
 
 
 def get_pruned_dim(dim, keep_ratio):
@@ -257,6 +257,110 @@ def pruning(transformer, distilled_transformer, res_keep_ratio, attn_keep_ratio,
     return distilled_transformer
 
 
+def fusion(transformer, distilled_transformer, res_keep_ratio, attn_keep_ratio, ffn_keep_ratio):
+    state_dict = transformer.state_dict()
+
+    encoder_layers = transformer.config.num_layers
+    decoder_layers = transformer.config.num_decoder_layers
+    num_heads = transformer.config.num_heads
+
+    layers_with_heads = {
+        "encoder": [
+            "encoder.block.{}.layer.0.SelfAttention.q.weight",
+            "encoder.block.{}.layer.0.SelfAttention.k.weight",
+            "encoder.block.{}.layer.0.SelfAttention.v.weight",
+            "encoder.block.{}.layer.0.SelfAttention.o.weight",
+        ],
+        "decoder": [
+            "decoder.block.{}.layer.0.SelfAttention.q.weight",
+            "decoder.block.{}.layer.0.SelfAttention.k.weight",
+            "decoder.block.{}.layer.0.SelfAttention.v.weight",
+            "decoder.block.{}.layer.0.SelfAttention.o.weight",
+            "decoder.block.{}.layer.1.EncDecAttention.q.weight",
+            "decoder.block.{}.layer.1.EncDecAttention.k.weight",
+            "decoder.block.{}.layer.1.EncDecAttention.v.weight",
+            "decoder.block.{}.layer.1.EncDecAttention.o.weight",
+        ]
+    }
+
+    ps = get_ps(transformer.config)
+
+    keep_ratio_dict = {}
+    for p, axes in ps.perm_to_axes.items():
+        if "res" in p:
+            keep_ratio_dict[p] = res_keep_ratio
+        elif "self" in p or "cross" in p:
+            keep_ratio_dict[p] = attn_keep_ratio
+        elif "ffn" in p:
+            keep_ratio_dict[p] = ffn_keep_ratio
+        else:
+            raise ValueError("The pruned module is unknown.")
+
+    # split weights for num_heads
+
+    state_dict_with_split_heads = {}
+
+    ignore_layers = [
+        "encoder.block.0.layer.0.SelfAttention.relative_attention_bias.weight",
+        "decoder.block.0.layer.0.SelfAttention.relative_attention_bias.weight"
+    ]
+
+    for k, v in state_dict.items():
+        if "Attention" in k and k not in ignore_layers:
+            if k.endswith("o.weight"):
+                weight_chunks = torch.chunk(v, num_heads, dim=1)
+            else:
+                weight_chunks = torch.chunk(v, num_heads, dim=0)
+
+            for chunk_id in range(len(weight_chunks)):
+                chunk_k = k + f".{chunk_id}"
+                state_dict_with_split_heads[chunk_k] = weight_chunks[chunk_id]
+        else:
+            state_dict_with_split_heads[k] = v
+
+    state_dict = state_dict_with_split_heads
+
+    perm = structural_pruning(ps, state_dict, keep_ratio_dict, max_iter=100, silent=False)
+
+    ignore_layers_weights = {}
+
+    for l in ignore_layers:
+        ignore_layers_weights[l] = state_dict.pop(l)
+    
+    pruned_state_dict = apply_permutation(ps, perm, state_dict)
+
+    pruned_state_dict.update(ignore_layers_weights)
+
+    # combine the weights of attention
+
+    for module_type in ["encoder", "decoder"]:
+        if module_type == "encoder":
+            num_layers = encoder_layers
+        else:
+            num_layers = decoder_layers
+
+        for i in range(num_layers):
+            for layer_with_heads in layers_with_heads[module_type]:
+                weights = []
+                new_layer_with_heads = layer_with_heads.format(i)
+                for head_idx in range(num_heads):
+                    layer_with_heads_this_head = new_layer_with_heads + f".{head_idx}"
+                    weights.append(pruned_state_dict[layer_with_heads_this_head])
+
+                if new_layer_with_heads.endswith("o.weight"):
+                    pruned_state_dict[new_layer_with_heads] = torch.cat(weights, dim=1)
+                else:
+                    pruned_state_dict[new_layer_with_heads] = torch.cat(weights, dim=0)
+
+                for head_idx in range(num_heads):
+                    layer_with_heads_this_head = new_layer_with_heads + f".{head_idx}"
+
+                    del pruned_state_dict[layer_with_heads_this_head]
+
+    
+    distilled_transformer.load_state_dict(pruned_state_dict)
+
+    return distilled_transformer
 
 
 if __name__ == "__main__":

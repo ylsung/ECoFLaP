@@ -19,9 +19,9 @@ datasets:
               - https://storage.googleapis.com/sfr-vision-language-research/LAVIS/datasets/vqav2/v2_OpenEnded_mscoco_val2014_questions.json
               - https://storage.googleapis.com/sfr-vision-language-research/LAVIS/datasets/vqav2/v2_mscoco_val2014_annotations.json
           storage:
-              - /playpen/ylsung/data/coco/annotations/vqa_val_eval.json
-              - /playpen/ylsung/data/coco/annotations/answer_list.json
-              - /playpen/ylsung/data/coco/annotations/v2_OpenEnded_mscoco_val2014_questions.json
-              - /playpen/ylsung/data/coco/annotations/v2_mscoco_val2014_annotations.json
+              - /work/users/y/l/ylsung/data/coco/annotations/vqa_val_eval.json
+              - /work/users/y/l/ylsung/data/coco/annotations/answer_list.json
+              - /work/users/y/l/ylsung/data/coco/annotations/v2_OpenEnded_mscoco_val2014_questions.json
+              - /work/users/y/l/ylsung/data/coco/annotations/v2_mscoco_val2014_annotations.json
       images:
-          storage: /playpen/ylsung/data/coco/images/
+          storage: /work/users/y/l/ylsung/data/coco/images/
