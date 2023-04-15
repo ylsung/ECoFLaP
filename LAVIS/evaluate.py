@@ -118,11 +118,13 @@ def parse_args():
     )
 
     parser.add_argument(
-        "--exact", type=bool, default=False, action="store_true"
+        "--exact", action="store_true"
     )
+
     parser.add_argument(
-        "--normalization", type=bool, default=False, action="store_true"
+        "--normalization", action="store_true"
     )
+
     parser.add_argument(
         "--metric", type=str, default="dot"
     )

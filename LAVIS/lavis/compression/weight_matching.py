@@ -59,8 +59,8 @@ def ot_weight_fusion(ps, params_a, params_b, max_iter=100, exact=True, normaliza
                 # print(f"[pivot]({len(ps.perm_to_axes[p])}): ", p, "wk: ", wk, "w_a shape: ", w_a.shape)
                 w_b = get_permuted_param_by_matrix(ps, perm, wk, params_b, except_axis=axis)
                 # print("[Current] p: {}, w_a shape: {}, w_b shape: {}".format(p, w_a.shape, w_b.shape))
-                w_a = torch.moveaxis(w_a, axis, 0).reshape((n, -1))
-                w_b = torch.moveaxis(w_b, axis, 0).reshape((m, -1))
+                w_a = torch.moveaxis(w_a, axis, 0).reshape((n, -1)).float()
+                w_b = torch.moveaxis(w_b, axis, 0).reshape((m, -1)).float()
                 
                 # print(m, n)
                 if normalization:
@@ -197,6 +197,7 @@ def get_permuted_param_by_matrix(ps, perm, k: str, params, except_axis=None):
 
             # print(k, p, w.shape, axis, T.shape)
 
+            T = T.to(w.dtype)
             w = torch.matmul(torch.transpose(w, axis, -1), T).transpose(-1, axis)
 
     return w

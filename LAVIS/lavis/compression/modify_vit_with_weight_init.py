@@ -280,7 +280,7 @@ if __name__ == "__main__":
 
     class Config:
         vit_side_pretrained_weight = "39-1.0-1.0-0.5"
-        distillation_init = "mag_prune"
+        distillation_init = "mag_prune+fusion"
         distill_merge_ratio = 0.5
         exact = True
         normalization = False

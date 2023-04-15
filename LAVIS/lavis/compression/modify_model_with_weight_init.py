@@ -860,7 +860,7 @@ if __name__ == "__main__":
             self.hard_prompt = None # "Find the relationship between the two concatenated sentences, or classify it if there is only one sentence."
             self.init_from_emb = True
 
-            self.side_pretrained_weight = "6-1.0-1.0-0.5"
+            self.side_pretrained_weight = "24-1.0-1.0-0.5"
             self.distillation_init = "mag_prune+fusion"
             self.distilled_block_ids = "[[0,1,2,3],[2,3,4,5],[4,5,6,7],[6,7,8,9],[8,9,10,11],[10,11]]" # "[0,1,2,3,4,[5,6,7,8,9,10,11]]" # "[[0,1],[2,3],[4,5],[6,7],[8,9],[10,11]]" "[0,1,2,[3,4,5],[6,7,8],[9,10,11]]"
             self.distilled_block_weights = None
@@ -870,14 +870,14 @@ if __name__ == "__main__":
             self.modules_to_merge = ".*|.*" # ".*layer_norm.*|.*DenseReluDense.*" # ".*|.*" 
             self.permute_before_merge = False
             self.permute_on_block_before_merge = False
-            self.distill_merge_ratio = 1.0
+            self.distill_merge_ratio = 0.5
             self.exact = True
             self.normalization = False
-            self.metric = "l2"
+            self.metric = "dot"
 
     config = AdapterConfig(args.adapter_type)
-    model = AutoModelForSeq2SeqLM.from_pretrained("t5-small") # google/flan-t5-xl
-    tokenizer = AutoTokenizer.from_pretrained("t5-small") # google/flan-t5-xl
+    model = AutoModelForSeq2SeqLM.from_pretrained("google/flan-t5-xl") # google/flan-t5-xl
+    tokenizer = AutoTokenizer.from_pretrained("google/flan-t5-xl") # google/flan-t5-xl
 
     
     for name, _ in model.state_dict().items():
