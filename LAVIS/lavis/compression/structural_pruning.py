@@ -146,9 +146,26 @@ def get_ps(config):
             ps_dict[f"decoder.block.{j}.layer.2.DenseReluDense.wi.weight"] = (f"P_dec_ffn_{j}", "P_res")
 
     # print(ps_dict)
-    ps = permutation_spec_from_axes_to_perm(ps_dict)
 
-    return ps
+    return ps_dict
+
+
+def split_weights_for_heads(state_dict, ignore_layers, num_heads):
+    state_dict_with_split_heads = {}
+    for k, v in state_dict.items():
+        if "Attention" in k and k not in ignore_layers:
+            if k.endswith("o.weight"):
+                weight_chunks = torch.chunk(v, num_heads, dim=1)
+            else:
+                weight_chunks = torch.chunk(v, num_heads, dim=0)
+
+            for chunk_id in range(len(weight_chunks)):
+                chunk_k = k + f".{chunk_id}"
+                state_dict_with_split_heads[chunk_k] = weight_chunks[chunk_id]
+        else:
+            state_dict_with_split_heads[k] = v
+
+    return state_dict_with_split_heads
 
 
 def pruning(transformer, distilled_transformer, res_keep_ratio, attn_keep_ratio, ffn_keep_ratio):
@@ -177,7 +194,8 @@ def pruning(transformer, distilled_transformer, res_keep_ratio, attn_keep_ratio,
         ]
     }
 
-    ps = get_ps(transformer.config)
+    ps_dict = get_ps(transformer.config)
+    ps = permutation_spec_from_axes_to_perm(ps_dict)
 
     keep_ratio_dict = {}
     for p, axes in ps.perm_to_axes.items():
@@ -257,9 +275,7 @@ def pruning(transformer, distilled_transformer, res_keep_ratio, attn_keep_ratio,
     return distilled_transformer
 
 
-def fusion(transformer, distilled_transformer, res_keep_ratio, attn_keep_ratio, ffn_keep_ratio):
-    state_dict = transformer.state_dict()
-
+def fusion(transformer, distilled_transformer, distill_merge_ratio=0.5, exact=True, normalization=False, metric="dot"):
     encoder_layers = transformer.config.num_layers
     decoder_layers = transformer.config.num_decoder_layers
     num_heads = transformer.config.num_heads
@@ -283,53 +299,42 @@ def fusion(transformer, distilled_transformer, res_keep_ratio, attn_keep_ratio, 
         ]
     }
 
-    ps = get_ps(transformer.config)
-
-    keep_ratio_dict = {}
-    for p, axes in ps.perm_to_axes.items():
-        if "res" in p:
-            keep_ratio_dict[p] = res_keep_ratio
-        elif "self" in p or "cross" in p:
-            keep_ratio_dict[p] = attn_keep_ratio
-        elif "ffn" in p:
-            keep_ratio_dict[p] = ffn_keep_ratio
-        else:
-            raise ValueError("The pruned module is unknown.")
+    ps_dict = get_ps(transformer.config)
+    ps = permutation_spec_from_axes_to_perm(ps_dict)
 
     # split weights for num_heads
-
-    state_dict_with_split_heads = {}
 
     ignore_layers = [
         "encoder.block.0.layer.0.SelfAttention.relative_attention_bias.weight",
         "decoder.block.0.layer.0.SelfAttention.relative_attention_bias.weight"
     ]
 
-    for k, v in state_dict.items():
-        if "Attention" in k and k not in ignore_layers:
-            if k.endswith("o.weight"):
-                weight_chunks = torch.chunk(v, num_heads, dim=1)
-            else:
-                weight_chunks = torch.chunk(v, num_heads, dim=0)
+    state_dict_with_heads = split_weights_for_heads(
+        transformer.state_dict(), ignore_layers, num_heads
+    )
+    distilled_state_dict_with_heads = split_weights_for_heads(
+        distilled_transformer.state_dict(), ignore_layers, num_heads
+    )
 
-            for chunk_id in range(len(weight_chunks)):
-                chunk_k = k + f".{chunk_id}"
-                state_dict_with_split_heads[chunk_k] = weight_chunks[chunk_id]
-        else:
-            state_dict_with_split_heads[k] = v
-
-    state_dict = state_dict_with_split_heads
-
-    perm = structural_pruning(ps, state_dict, keep_ratio_dict, max_iter=100, silent=False)
+    perm = ot_weight_fusion(
+        ps, 
+        distilled_state_dict_with_heads, 
+        state_dict_with_heads, 
+        max_iter=100, 
+        exact=exact, 
+        normalization=normalization, 
+        metric=metric, 
+        silent=True,
+    )
 
     ignore_layers_weights = {}
 
     for l in ignore_layers:
-        ignore_layers_weights[l] = state_dict.pop(l)
+        ignore_layers_weights[l] = state_dict_with_heads.pop(l)
     
-    pruned_state_dict = apply_permutation(ps, perm, state_dict)
+    fusion_state_dict = apply_permutation_by_matrix(ps, perm, state_dict_with_heads)
 
-    pruned_state_dict.update(ignore_layers_weights)
+    fusion_state_dict.update(ignore_layers_weights)
 
     # combine the weights of attention
 
@@ -345,20 +350,25 @@ def fusion(transformer, distilled_transformer, res_keep_ratio, attn_keep_ratio, 
                 new_layer_with_heads = layer_with_heads.format(i)
                 for head_idx in range(num_heads):
                     layer_with_heads_this_head = new_layer_with_heads + f".{head_idx}"
-                    weights.append(pruned_state_dict[layer_with_heads_this_head])
+                    weights.append(fusion_state_dict[layer_with_heads_this_head])
 
                 if new_layer_with_heads.endswith("o.weight"):
-                    pruned_state_dict[new_layer_with_heads] = torch.cat(weights, dim=1)
+                    fusion_state_dict[new_layer_with_heads] = torch.cat(weights, dim=1)
                 else:
-                    pruned_state_dict[new_layer_with_heads] = torch.cat(weights, dim=0)
+                    fusion_state_dict[new_layer_with_heads] = torch.cat(weights, dim=0)
 
                 for head_idx in range(num_heads):
                     layer_with_heads_this_head = new_layer_with_heads + f".{head_idx}"
 
-                    del pruned_state_dict[layer_with_heads_this_head]
+                    del fusion_state_dict[layer_with_heads_this_head]
 
-    
-    distilled_transformer.load_state_dict(pruned_state_dict)
+
+    distilled_state_dict = distilled_transformer.state_dict()
+
+    for k in distilled_state_dict.keys():
+        distilled_state_dict[k] = (1 - distill_merge_ratio) * distilled_state_dict[k] + distill_merge_ratio * fusion_state_dict[k]
+
+    distilled_transformer.load_state_dict(distilled_state_dict)
 
     return distilled_transformer
 

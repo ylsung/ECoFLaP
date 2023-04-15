@@ -56,8 +56,9 @@ def ot_weight_fusion(ps, params_a, params_b, max_iter=100, exact=True, normaliza
             A = torch.zeros((m, n))
             for wk, axis in ps.perm_to_axes[p]:
                 w_a = params_a[wk]
+                # print(f"[pivot]({len(ps.perm_to_axes[p])}): ", p, "wk: ", wk, "w_a shape: ", w_a.shape)
                 w_b = get_permuted_param_by_matrix(ps, perm, wk, params_b, except_axis=axis)
-                # print(p, w_a.shape, w_b.shape)
+                # print("[Current] p: {}, w_a shape: {}, w_b shape: {}".format(p, w_a.shape, w_b.shape))
                 w_a = torch.moveaxis(w_a, axis, 0).reshape((n, -1))
                 w_b = torch.moveaxis(w_b, axis, 0).reshape((m, -1))
                 
@@ -70,10 +71,10 @@ def ot_weight_fusion(ps, params_a, params_b, max_iter=100, exact=True, normaliza
                     A -= w_b @ w_a.T
 
                 elif metric == "l2":
-                    diff = w_b[:, None, :] - w_a[None, :, :] 
-                    distances = torch.sum(diff**2, dim=-1) # (m, n)
-
-                    A += distances
+                    if torch.cuda.is_available():
+                        A += torch.cdist(w_b.cuda(), w_a.cuda(), p=2).cpu()
+                    else:
+                        A += torch.cdist(w_b, w_a, p=2)
             
             mu = np.ones(m) / m
             nu = np.ones(n) / n
@@ -194,7 +195,7 @@ def get_permuted_param_by_matrix(ps, perm, k: str, params, except_axis=None):
         if p is not None:
             T = perm[p].t()
 
-            # print(k, p, w.shape, T.shape)
+            # print(k, p, w.shape, axis, T.shape)
 
             w = torch.matmul(torch.transpose(w, axis, -1), T).transpose(-1, axis)
 

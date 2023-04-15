@@ -31,6 +31,8 @@ from lavis.tasks import *
 
 from lavis.compression.modify_model_with_weight_init import t5_modify_with_weight_init
 
+from lavis.compression.modify_vit_with_weight_init import vit_modify_with_weight_init
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Training")
@@ -46,6 +48,13 @@ def parse_args():
 
     parser.add_argument(
         "--side_pretrained_weight",
+        type=str,
+        default=None,
+        help="The pre-trained config for the distilled transformer."
+    )
+
+    parser.add_argument(
+        "--vit_side_pretrained_weight",
         type=str,
         default=None,
         help="The pre-trained config for the distilled transformer."
@@ -100,6 +109,28 @@ def parse_args():
         help="The id of the Job"
     )
 
+    parser.add_argument(
+        "--vit_ffn_ratio", type=float, default=1.0
+    )
+
+    parser.add_argument(
+        "--distilled_merge_ratio", type=float, default=0.5
+    )
+
+    parser.add_argument(
+        "--exact", type=bool, default=False, action="store_true"
+    )
+    parser.add_argument(
+        "--normalization", type=bool, default=False, action="store_true"
+    )
+    parser.add_argument(
+        "--metric", type=str, default="dot"
+    )
+
+    parser.add_argument(
+        "--distill_merge_ratio", type=float, default=0.5
+    )
+
     args = parser.parse_args()
     # if 'LOCAL_RANK' not in os.environ:
     #     os.environ['LOCAL_RANK'] = str(args.local_rank)
@@ -148,6 +179,8 @@ def main():
     orig_total_size = sum(
         param.numel() for param in model.parameters()
     )
+
+    model.visual_encoder = vit_modify_with_weight_init(model.visual_encoder, args, model.freeze_vit, model.vit_precision)
 
     model.t5_model = t5_modify_with_weight_init(model.t5_model, args)
 
