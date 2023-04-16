@@ -8,30 +8,18 @@ import sys
 GPU = sys.argv[1]
 port = sys.argv[2]
 
-# for ratio in [0.9, 0.8, 0.7, 0.6]:
 
-#     job_id = f"mag_prune_vit{ratio}"
+for distill_merge_ratio in [0.25, 0.5, 0.75, 1.0]:
+    for ratio in [0.7]:
 
-#     program = (f"CUDA_VISIBLE_DEVICES={GPU} python -m torch.distributed.run --nproc_per_node=1 --master_port {port} evaluate_v.py"
-#     f" --cfg-path lavis/projects/blip2/eval/vqav2_zeroshot_flant5xl_eval.yaml"
-#     f" --distillation_init None --vit_ffn_ratio {ratio}"
-#     f" --job_id '{job_id}'")
+        ratios = f"1.0-1.0-{ratio}"
 
-#     print(program)
-#     subprocess.call(program, shell=True)
+        job_id = f"vit+t5-mag_prune{ratios}+fusion{distill_merge_ratio}"
 
+        program = (f"CUDA_VISIBLE_DEVICES={GPU} python -m torch.distributed.run --nproc_per_node=1 --master_port {port} evaluate.py"
+        f" --cfg-path lavis/projects/blip2/eval/vqav2_zeroshot_flant5xl_eval.yaml"
+        f" --distillation_init 'mag_prune+fusion' --exact --distill_merge_ratio {distill_merge_ratio}"
+        f" --vit_side_pretrained_weight 39-{ratios} --vit_side_pretrained_weight 24-{ratios} --job_id '{job_id}'")
 
-for ratio in [0.7, 0.6]:
-
-    ratios = f"1.0-1.0-{ratio}"
-    job_id = f"mag_prune_{ratios}_vit{ratio}"
-
-    program = (f"CUDA_VISIBLE_DEVICES={GPU} python -m torch.distributed.run --nproc_per_node=1 --master_port {port} evaluate_v.py"
-    f" --cfg-path lavis/projects/blip2/eval/vqav2_zeroshot_flant5xl_eval.yaml"
-    f" --vit_ffn_ratio {ratio}"
-    f" --distillation_init 'mag_prune'"
-    f" --side_pretrained_weight 24-{ratios} --job_id '{job_id}'")
-
-    print(program)
-    subprocess.call(program, shell=True)
-
+        print(program)
+        subprocess.call(program, shell=True)
