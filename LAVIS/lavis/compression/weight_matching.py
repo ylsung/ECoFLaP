@@ -197,8 +197,12 @@ def get_permuted_param_by_matrix(ps, perm, k: str, params, except_axis=None):
 
             # print(k, p, w.shape, axis, T.shape)
 
-            T = T.to(w.dtype)
+            dtype = w.dtype
+            T = T.float() # cast to float for matmul
+            w = w.float() # cast to float for matmul
             w = torch.matmul(torch.transpose(w, axis, -1), T).transpose(-1, axis)
+
+            w = w.to(dtype) # cast it back
 
     return w
 
