@@ -895,7 +895,7 @@ if __name__ == "__main__":
             self.hard_prompt = None # "Find the relationship between the two concatenated sentences, or classify it if there is only one sentence."
             self.init_from_emb = True
 
-            self.side_pretrained_weight = "24-1.0-1.0-0.5"
+            self.side_pretrained_weight = "6-1.0-1.0-0.5"
             self.distillation_init = "mag_prune"
             self.distilled_block_ids = "[[0,1,2,3],[2,3,4,5],[4,5,6,7],[6,7,8,9],[8,9,10,11],[10,11]]" # "[0,1,2,3,4,[5,6,7,8,9,10,11]]" # "[[0,1],[2,3],[4,5],[6,7],[8,9],[10,11]]" "[0,1,2,[3,4,5],[6,7,8],[9,10,11]]"
             self.distilled_block_weights = None
@@ -913,8 +913,8 @@ if __name__ == "__main__":
             self.importance = True
 
     config = AdapterConfig(args.adapter_type)
-    model = AutoModelForSeq2SeqLM.from_pretrained("google/flan-t5-xl") # google/flan-t5-xl
-    tokenizer = AutoTokenizer.from_pretrained("google/flan-t5-xl") # google/flan-t5-xl
+    model = AutoModelForSeq2SeqLM.from_pretrained("t5-small") # google/flan-t5-xl
+    tokenizer = AutoTokenizer.from_pretrained("t5-small") # google/flan-t5-xl
 
     # input_seq = tokenizer(
     #     ["Applies a linear transformation to the incoming data.", "Parameters: in_features - size of each input sample. out_features - size of each output sample."],

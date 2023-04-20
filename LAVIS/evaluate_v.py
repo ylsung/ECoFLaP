@@ -106,6 +106,20 @@ def parse_args():
         "--vit_ffn_ratio", type=float, default=1.0
     )
 
+    parser.add_argument(
+        "--distilled_merge_ratio", type=float, default=0.5
+    )
+
+    parser.add_argument(
+        "--exact", type=bool, default=False, action="store_true"
+    )
+    parser.add_argument(
+        "--normalization", type=bool, default=False, action="store_true"
+    )
+    parser.add_argument(
+        "--metric", type=str, default="dot"
+    )
+
     args = parser.parse_args()
     # if 'LOCAL_RANK' not in os.environ:
     #     os.environ['LOCAL_RANK'] = str(args.local_rank)

@@ -103,7 +103,7 @@ def ot_weight_fusion(ps, params_a, params_b, max_iter=100, exact=True, normaliza
             if exact:
                 T = ot.emd(mu, nu, A.cpu().numpy())
             else:
-                T = ot.bregman.sinkhorn(mu, nu, A.cpu().numpy(), reg=1e-2)
+                T = ot.bregman.sinkhorn(mu, nu, A.cpu().numpy(), reg=1e10)
 
             T_var = torch.from_numpy(T).float() # T: (m, n)
 
