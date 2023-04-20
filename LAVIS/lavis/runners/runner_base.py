@@ -44,7 +44,7 @@ class RunnerBase:
     will support other distributed frameworks.
     """
 
-    def __init__(self, cfg, task, model, datasets, job_id):
+    def __init__(self, cfg, task, model, datasets, job_id=None):
         self.config = cfg
         self.job_id = job_id
 
@@ -63,7 +63,9 @@ class RunnerBase:
         self.start_epoch = 0
 
         # self.setup_seeds()
-        self.setup_output_dir()
+
+        if job_id is not None:
+            self.setup_output_dir()
 
     @property
     def device(self):
@@ -423,6 +425,70 @@ class RunnerBase:
                 )
 
             return test_logs
+
+    def get_data_derivative(self, num_data=128, power=2, num_logits=1):
+        model = self.unwrap_dist_model(self.model)
+        model.eval()
+
+        # record the requires_grad variable, for recovering it later
+        requires_grad_record = {n: p.requires_grad for n, p in model.named_parameters()}
+
+        # set requires_grad to be true for getting model's derivatives
+        for n, p in model.named_parameters():
+            p.requires_grad = True
+
+
+        batch_size_train_record = self.config.run_cfg.batch_size_train
+        batch_size_eval_record = self.config.run_cfg.batch_size_eval
+
+        self.config.run_cfg.batch_size_train = 1
+        self.config.run_cfg.batch_size_eval = 1
+
+        split_name = self.test_splits[0]
+        data_loader = self.dataloaders.get(split_name, None)
+        assert data_loader, "data_loader for split {} is None.".format(split_name)
+
+        self.config.run_cfg.batch_size_train = batch_size_train_record
+        self.config.run_cfg.batch_size_eval = batch_size_eval_record
+
+        # datasets = [self.datasets[split] for split in self.datasets]
+
+        # collate_fns = []
+        # batch_sizes = []
+        # is_trains = []
+        # for dataset in datasets:
+        #     if isinstance(dataset, tuple) or isinstance(dataset, list):
+        #         collate_fns.append([getattr(d, "collater", None) for d in dataset])
+        #     else:
+        #         collate_fns.append(getattr(dataset, "collater", None))
+
+        #     batch_sizes.append(1)
+        #     is_trains.append(False)
+
+        # data_loaders = self.create_loaders(
+        #     datasets=datasets,
+        #     num_workers=self.config.run_cfg.num_workers,
+        #     batch_sizes=batch_sizes,
+        #     is_trains=is_trains,
+        #     collate_fns=collate_fns,
+        # )
+
+        # data_loader = data_loaders[0]
+
+        derivative_info = self.task.get_data_derivative(
+            model=model, 
+            data_loader=data_loader, 
+            num_data=num_data, 
+            power=power,
+            num_logits=num_logits,
+            cuda_enabled=self.cuda_enabled
+        )
+
+        # set to original requires grad
+        for n, p in model.named_parameters():
+            p.requires_grad = requires_grad_record[n]
+
+        return derivative_info
 
     def train_epoch(self, epoch):
         # train

@@ -44,29 +44,12 @@ def structural_pruning(ps, params_a, keep_ratio_dict, max_iter=100, silent=True)
     
                 w_a = get_permuted_param(ps, perm, wk, params_a, except_axis=axis)
 
-                # print(wk)
-                # print(w_a.shape)
-
-                # print(wk)
-                # print("old")
-                # if len(w_a.shape) == 1:
-                #     w_a = w_a.unsqueeze(-1)
-                #     A += torch.norm(w_a, dim=-1)
-                #     print(torch.norm(w_a, dim=-1) ** 2)
-                # else:
-                #     A += torch.norm(w_a.T, dim=axis)
-
-                #     print(w_a.shape)
-                #     print(torch.norm(w_a.T, dim=axis) ** 2)
-
                 w_a = torch.moveaxis(w_a, axis, 0).reshape((n, -1)).float()
 
-                # print("new")
-                # print(torch.diagonal(w_a @ w_a.T))
-
-                A += torch.diagonal(w_a @ w_a.T)
+                A += torch.norm(w_a, p=1, dim=-1)
 
             # print(A)
+
             ci = torch.argsort(A, -1, descending=True)
 
             # print(ci)
@@ -168,9 +151,7 @@ def split_weights_for_heads(state_dict, ignore_layers, num_heads):
     return state_dict_with_split_heads
 
 
-def pruning(transformer, distilled_transformer, res_keep_ratio, attn_keep_ratio, ffn_keep_ratio):
-    state_dict = transformer.state_dict()
-
+def pruning(transformer, distilled_transformer, importance_measure, res_keep_ratio, attn_keep_ratio, ffn_keep_ratio):
     encoder_layers = transformer.config.num_layers
     decoder_layers = transformer.config.num_decoder_layers
     num_heads = transformer.config.num_heads
@@ -210,29 +191,20 @@ def pruning(transformer, distilled_transformer, res_keep_ratio, attn_keep_ratio,
 
     # split weights for num_heads
 
-    state_dict_with_split_heads = {}
-
     ignore_layers = [
         "encoder.block.0.layer.0.SelfAttention.relative_attention_bias.weight",
         "decoder.block.0.layer.0.SelfAttention.relative_attention_bias.weight"
     ]
 
-    for k, v in state_dict.items():
-        if "Attention" in k and k not in ignore_layers:
-            if k.endswith("o.weight"):
-                weight_chunks = torch.chunk(v, num_heads, dim=1)
-            else:
-                weight_chunks = torch.chunk(v, num_heads, dim=0)
+    state_dict = split_weights_for_heads(
+        transformer.state_dict(), ignore_layers, num_heads
+    )
 
-            for chunk_id in range(len(weight_chunks)):
-                chunk_k = k + f".{chunk_id}"
-                state_dict_with_split_heads[chunk_k] = weight_chunks[chunk_id]
-        else:
-            state_dict_with_split_heads[k] = v
+    importance_measure = split_weights_for_heads(
+        importance_measure, ignore_layers, num_heads
+    )
 
-    state_dict = state_dict_with_split_heads
-
-    perm = structural_pruning(ps, state_dict, keep_ratio_dict, max_iter=100, silent=True)
+    perm = structural_pruning(ps, importance_measure, keep_ratio_dict, max_iter=100, silent=True)
 
     ignore_layers_weights = {}
 
@@ -275,7 +247,7 @@ def pruning(transformer, distilled_transformer, res_keep_ratio, attn_keep_ratio,
     return distilled_transformer
 
 
-def fusion(transformer, distilled_transformer, distill_merge_ratio=0.5, exact=True, normalization=False, metric="dot"):
+def fusion(transformer, distilled_transformer, distill_merge_ratio=0.5, exact=True, normalization=False, metric="dot", to_one=False, importance=False):
     encoder_layers = transformer.config.num_layers
     decoder_layers = transformer.config.num_decoder_layers
     num_heads = transformer.config.num_heads
@@ -324,6 +296,8 @@ def fusion(transformer, distilled_transformer, distill_merge_ratio=0.5, exact=Tr
         exact=exact, 
         normalization=normalization, 
         metric=metric, 
+        to_one=to_one,
+        importance=importance,
         silent=True,
     )
 

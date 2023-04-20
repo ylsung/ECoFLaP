@@ -148,6 +148,55 @@ class BaseTask:
             accum_grad_iters=accum_grad_iters,
         )
 
+    def get_data_derivative(self, model, data_loader, num_data=128, power=2, num_logits=1, cuda_enabled=False):
+        metric_logger = MetricLogger(delimiter="  ")
+        header = "Get data derivative"
+        # TODO make it configurable
+        print_freq = 5
+
+        gradients_dict = {}
+
+        if power == 1:
+            grad_method = torch.abs
+        elif power == 2:
+            grad_method = torch.square
+        else:
+            raise ValueError(f"power in `get_data_derivative` can only be 1 or 2, but got {power}")
+
+        for name, param in model.named_parameters():
+            gradients_dict[name] = 0
+
+        idx = 0
+        for samples in data_loader:
+            samples = prepare_sample(samples, cuda_enabled=cuda_enabled)
+
+            logits = model.get_logits_without_labels(samples)["logits"][:, 0, :] # take the output of the first token
+
+            probs = torch.nn.functional.softmax(logits, -1)
+
+            probs = torch.gather(probs, -1, torch.argsort(probs, descending=True))[:, :num_logits] # (B, num_logits)
+            log_probs = probs.log()
+
+            for b in range(log_probs.shape[0]):
+                for i in range(log_probs.shape[1]):
+                    loss = - log_probs[b, i]
+                    loss.backward(retain_graph=True)
+
+                    prob = probs[b, i]
+
+                    for name, param in model.named_parameters():
+                        gradients_dict[name] += (prob * grad_method(param.grad)).cpu().data
+
+                    model.zero_grad()
+
+            idx += 1
+
+            if idx >= num_data:
+                break
+
+        return gradients_dict
+            
+
     def _train_inner_loop(
         self,
         epoch,

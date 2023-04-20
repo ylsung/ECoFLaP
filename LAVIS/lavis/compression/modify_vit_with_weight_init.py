@@ -51,7 +51,7 @@ def get_vit_ps(num_layers, num_heads):
     return ps_dict
 
 
-def vit_pruning(vit, distilled_vit, res_keep_ratio, attn_keep_ratio, ffn_keep_ratio):
+def vit_pruning(vit, distilled_vit, importance_measure, res_keep_ratio, attn_keep_ratio, ffn_keep_ratio):
     state_dict = vit.state_dict()
 
     num_layers = vit.depth
@@ -72,12 +72,9 @@ def vit_pruning(vit, distilled_vit, res_keep_ratio, attn_keep_ratio, ffn_keep_ra
             raise ValueError("The pruned module is unknown.")
 
     # split weights for num_heads
-
-    state_dict_with_split_heads = {}
-
     ignore_layers = []
 
-    perm = structural_pruning(ps, state_dict, keep_ratio_dict, max_iter=100, silent=True)
+    perm = structural_pruning(ps, importance_measure, keep_ratio_dict, max_iter=100, silent=True)
 
     ignore_layers_weights = {}
 
@@ -93,7 +90,7 @@ def vit_pruning(vit, distilled_vit, res_keep_ratio, attn_keep_ratio, ffn_keep_ra
     return distilled_vit
 
 
-def vit_fusion(vit, distilled_vit, distill_merge_ratio=0.5, exact=True, normalization=False, metric="dot"):
+def vit_fusion(vit, distilled_vit, distill_merge_ratio=0.5, exact=True, normalization=False, metric="dot", to_one=False, importance=False):
     num_layers = vit.depth
     num_heads = vit.num_heads
 
@@ -113,6 +110,8 @@ def vit_fusion(vit, distilled_vit, distill_merge_ratio=0.5, exact=True, normaliz
         exact=exact, 
         normalization=normalization, 
         metric=metric, 
+        to_one=to_one,
+        importance=importance,
         silent=True,
     )
 
@@ -136,7 +135,7 @@ def vit_fusion(vit, distilled_vit, distill_merge_ratio=0.5, exact=True, normaliz
 
 
 
-def vit_modify_with_weight_init(vit, petl_config, freeze_vit, precision, sampled_loader=None):
+def vit_modify_with_weight_init(vit, petl_config, freeze_vit, precision, derivative_info=None, sampled_loader=None):
     device = list(vit.parameters())[0].device
 
     vit.to("cpu")
@@ -232,11 +231,38 @@ def vit_modify_with_weight_init(vit, petl_config, freeze_vit, precision, sampled
             #         petl_config.learnable_weight_type
             #     )
 
-            if "mag_prune" in petl_config.distillation_init:
-                print("Apply magnitude pruning on ViT...")
+            if "prune" in petl_config.distillation_init:
+                if derivative_info is not None:
+                    derivative_info = {k[15:]: v for k, v in derivative_info.items() if k.startswith("visual_encoder.blocks")} # filter out some info that is not for this transformer
+
+                if "mag_prune" in petl_config.distillation_init:
+                    print("Apply magnitude pruning...")
+                    # using square of magnitude as the measure.
+                    importance_measure = {k: v ** 2 for k, v in vit.state_dict().items()}
+
+                elif "derv_prune" in petl_config.distillation_init:
+                    print("Apply derivative pruning...")
+                    importance_measure = derivative_info
+
+                elif "obs_prune" in petl_config.distillation_init:
+                    print("Apply derivative pruning...")
+                    importance_measure = {k: (v ** 2) * derivative_info[k] for k, v in vit.state_dict().items()}
+
+                elif "zero_prune" in petl_config.distillation_init:
+                    print("Apply zero pruning (all the importance is zero)...")
+                    importance_measure = {k: torch.zeros_like(v) for k, v in vit.state_dict().items()}
+
+                elif "rand_prune" in petl_config.distillation_init:
+                    print("Apply random pruning (all the importance is random)...")
+                    importance_measure = {k: torch.randn_like(v) for k, v in vit.state_dict().items()}
+
+                else:
+                    raise ValueError("The pruning method is invalid.")
+
                 distilled_vit = vit_pruning(
                     vit, 
                     distilled_vit, 
+                    importance_measure,
                     res_keep_ratio, 
                     attn_keep_ratio, 
                     ffn_keep_ratio
@@ -250,7 +276,9 @@ def vit_modify_with_weight_init(vit, petl_config, freeze_vit, precision, sampled
                     distill_merge_ratio=petl_config.distill_merge_ratio, 
                     exact=petl_config.exact, 
                     normalization=petl_config.normalization, 
-                    metric=petl_config.metric
+                    metric=petl_config.metric,
+                    to_one=petl_config.to_one,
+                    importance=petl_config.importance,
                 )
 
         distilled_vit.to(device)
@@ -277,14 +305,18 @@ if __name__ == "__main__":
     import torch
     import torch.nn as nn
 
+    torch.manual_seed(0)
+
 
     class Config:
         vit_side_pretrained_weight = "39-1.0-1.0-0.5"
-        distillation_init = "mag_prune+fusion"
+        distillation_init = "mag_prune"
         distill_merge_ratio = 0.5
         exact = True
         normalization = False
         metric = "dot"
+        to_one = False
+        importance = False
 
     config = Config()
 
@@ -297,7 +329,9 @@ if __name__ == "__main__":
 
     old_output = vit(x)
 
-    vit = vit_modify_with_weight_init(vit, config, True, "fp32")
+    derivative_info = {k: v ** 2 for k, v in vit.named_parameters()}
+
+    vit = vit_modify_with_weight_init(vit, config, True, "fp32", derivative_info)
 
     new_output = vit(x)
 

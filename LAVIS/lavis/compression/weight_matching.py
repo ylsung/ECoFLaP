@@ -34,7 +34,21 @@ def get_uniform_T(len_a, len_b):
     return T_var.t() # (len_a, len_b)
 
 
-def ot_weight_fusion(ps, params_a, params_b, max_iter=100, exact=True, normalization=False, metric="dot", silent=True):
+def get_neuron_importance_histogram(ps, p, params, length, eps=1e-9):
+    importance_hist = torch.zeros((length,))
+    for wk, axis in ps.perm_to_axes[p]:
+        w_a = params[wk]
+
+        w_a = torch.moveaxis(w_a, axis, 0).reshape((length, -1)).float()
+
+        importance_hist += torch.norm(w_a, dim=-1)
+
+    importance_hist = importance_hist / importance_hist.sum()
+    # assert importance_hist.sum() == 1.0
+    return importance_hist.numpy()
+
+
+def ot_weight_fusion(ps, params_a, params_b, max_iter=100, exact=True, normalization=False, metric="dot", to_one=False, importance=False, silent=True):
     """Find a permutation of `params_b` to make them match `params_a`."""
     perm_sizes = {p: params_a[axes[0][0]].shape[axes[0][1]] for p, axes in ps.perm_to_axes.items()}
 
@@ -75,9 +89,16 @@ def ot_weight_fusion(ps, params_a, params_b, max_iter=100, exact=True, normaliza
                         A += torch.cdist(w_b.cuda(), w_a.cuda(), p=2).cpu()
                     else:
                         A += torch.cdist(w_b, w_a, p=2)
-            
-            mu = np.ones(m) / m
-            nu = np.ones(n) / n
+
+            if importance:
+                mu = get_neuron_importance_histogram(ps, p, params_b, m)
+                nu = get_neuron_importance_histogram(ps, p, params_a, n)
+
+                # print(mu)
+                # print(nu)
+            else:
+                mu = np.ones(m) / m
+                nu = np.ones(n) / n
 
             if exact:
                 T = ot.emd(mu, nu, A.cpu().numpy())
@@ -100,10 +121,15 @@ def ot_weight_fusion(ps, params_a, params_b, max_iter=100, exact=True, normaliza
             # print(T_var.sum(0), T_var.sum(1))
 
             # normalization
-            marginals = torch.ones(T_var.shape[1]) / T_var.shape[1]
+            if to_one:
+                marginals = torch.ones(T_var.shape[1]) * T_var.max()
+            else:
+                marginals = torch.ones(T_var.shape[1]) / T_var.shape[1]
+
             marginals = torch.diag(1.0/(marginals + 1e-12))  # take inverse
-            # print(marginals)
             T_var = torch.matmul(T_var, marginals)
+
+            # print(T_var)
 
             if not silent:
                 print(f"{iteration}/{p}: {newL - oldL}")

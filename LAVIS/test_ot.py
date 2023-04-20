@@ -84,7 +84,7 @@ for iteration in range(total):
 
         params_b = model_b.state_dict()
 
-        perm = ot_weight_fusion(ps, params_b, params_a, silent=True)
+        perm = ot_weight_fusion(ps, params_b, params_a, to_one=False, importance=True, silent=True)
         updated_params = apply_permutation_by_matrix(ps, perm, params_a)
 
         model_b.load_state_dict(updated_params)

@@ -703,7 +703,7 @@ def weights_multiplication_from_different_layers(weights_to_distill, target_name
     return weights
 
 
-def t5_modify_with_weight_init(transformer, petl_config, sampled_loader=None):
+def t5_modify_with_weight_init(transformer, petl_config, derivative_info=None, sampled_loader=None):
 
     device = list(transformer.parameters())[0].device
 
@@ -801,11 +801,44 @@ def t5_modify_with_weight_init(transformer, petl_config, sampled_loader=None):
                     petl_config.learnable_weight_type
                 )
 
-            if "mag_prune" in petl_config.distillation_init:
-                print("Apply magnitude pruning...")
+            if "prune" in petl_config.distillation_init:
+                if derivative_info is not None:
+                    derivative_info = {k[9:]: v for k, v in derivative_info.items() if k.startswith("t5_model")} # filter out some info that is not for this transformer
+                    
+                    # add back some weight which is shared-weight
+                    for n, p in transformer.state_dict().items():
+                        if n not in derivative_info: # those are shared embeddings
+                            print(f"doesn't have {n}. Use shared.weight for it.")
+                            derivative_info[n] = derivative_info["shared.weight"]
+
+                if "mag_prune" in petl_config.distillation_init:
+                    print("Apply magnitude pruning...")
+                    # using square of magnitude as the measure.
+                    importance_measure = {k: v ** 2 for k, v in transformer.state_dict().items()}
+
+                elif "derv_prune" in petl_config.distillation_init:
+                    print("Apply derivative pruning...")
+                    importance_measure = derivative_info
+
+                elif "obs_prune" in petl_config.distillation_init:
+                    print("Apply derivative pruning...")
+                    importance_measure = {k: (v ** 2) * derivative_info[k] for k, v in transformer.state_dict().items()}
+
+                elif "zero_prune" in petl_config.distillation_init:
+                    print("Apply zero pruning (all the importance is zero)...")
+                    importance_measure = {k: torch.zeros_like(v) for k, v in transformer.state_dict().items()}
+
+                elif "rand_prune" in petl_config.distillation_init:
+                    print("Apply random pruning (all the importance is random)...")
+                    importance_measure = {k: torch.randn_like(v) for k, v in transformer.state_dict().items()}
+
+                else:
+                    raise ValueError("The pruning method is invalid.")
+
                 distilled_transformer = pruning(
                     transformer, 
                     distilled_transformer, 
+                    importance_measure,
                     res_keep_ratio, 
                     attn_keep_ratio, 
                     ffn_keep_ratio
@@ -819,7 +852,9 @@ def t5_modify_with_weight_init(transformer, petl_config, sampled_loader=None):
                     distill_merge_ratio=petl_config.distill_merge_ratio, 
                     exact=petl_config.exact, 
                     normalization=petl_config.normalization, 
-                    metric=petl_config.metric
+                    metric=petl_config.metric,
+                    to_one=petl_config.to_one,
+                    importance=petl_config.importance,
                 )
 
         distilled_transformer.to(device)
@@ -861,7 +896,7 @@ if __name__ == "__main__":
             self.init_from_emb = True
 
             self.side_pretrained_weight = "24-1.0-1.0-0.5"
-            self.distillation_init = "mag_prune+fusion"
+            self.distillation_init = "mag_prune"
             self.distilled_block_ids = "[[0,1,2,3],[2,3,4,5],[4,5,6,7],[6,7,8,9],[8,9,10,11],[10,11]]" # "[0,1,2,3,4,[5,6,7,8,9,10,11]]" # "[[0,1],[2,3],[4,5],[6,7],[8,9],[10,11]]" "[0,1,2,[3,4,5],[6,7,8],[9,10,11]]"
             self.distilled_block_weights = None
             self.rep_stack_forward = True
@@ -874,16 +909,12 @@ if __name__ == "__main__":
             self.exact = True
             self.normalization = False
             self.metric = "dot"
+            self.to_one = False
+            self.importance = True
 
     config = AdapterConfig(args.adapter_type)
     model = AutoModelForSeq2SeqLM.from_pretrained("google/flan-t5-xl") # google/flan-t5-xl
     tokenizer = AutoTokenizer.from_pretrained("google/flan-t5-xl") # google/flan-t5-xl
-
-    
-    for name, _ in model.state_dict().items():
-        if "block" not in name:
-            print(name)
-
 
     # input_seq = tokenizer(
     #     ["Applies a linear transformation to the incoming data.", "Parameters: in_features - size of each input sample. out_features - size of each output sample."],
@@ -946,8 +977,10 @@ if __name__ == "__main__":
         )
     else:
         sampled_loader = None
+    
+    derivative_info = {k: v ** 2 for k, v in model.named_parameters()}
 
-    model = t5_modify_with_weight_init(model, config, sampled_loader)
+    model = t5_modify_with_weight_init(model, config, derivative_info, sampled_loader)
     new_param = model.state_dict()
     # for i in new_param.keys():
     #     print(i)

@@ -7,6 +7,7 @@
 
 import argparse
 import random
+import time
 
 import numpy as np
 import torch
@@ -133,6 +134,30 @@ def parse_args():
         "--distill_merge_ratio", type=float, default=0.5
     )
 
+    parser.add_argument(
+        "--to_one", action="store_true"
+    )
+
+    parser.add_argument(
+        "--importance", action="store_true"
+    )
+
+    parser.add_argument(
+        "--num_data", type=int, default=64
+    )
+
+    parser.add_argument(
+        "--power", type=int, default=2
+    )
+
+    parser.add_argument(
+        "--num_logits", type=int, default=1
+    )
+
+    parser.add_argument(
+        "--get_derivative_info", action="store_true"
+    )
+
     args = parser.parse_args()
     # if 'LOCAL_RANK' not in os.environ:
     #     os.environ['LOCAL_RANK'] = str(args.local_rank)
@@ -178,13 +203,32 @@ def main():
     datasets = task.build_datasets(cfg)
     model = task.build_model(cfg)
 
+    if args.get_derivative_info:
+        print("Setup for computing derivatice info")
+
+        runner = RunnerBase(
+            cfg=cfg, job_id=None, task=task, model=model, datasets=datasets
+        )
+
+        start = time.time()
+
+        print("Start to compute derivatice info")
+        derivative_info = runner.get_data_derivative(num_data=args.num_data, power=args.power, num_logits=args.num_logits)
+
+        end = time.time()
+        print(f"Finish computing derivatice info, using {end - start:.3f}s")
+        # for n, p in derivative_info.items():
+        #     print(n, p.shape)
+    else:
+        derivative_info = None
+
     orig_total_size = sum(
         param.numel() for param in model.parameters()
     )
 
-    model.visual_encoder = vit_modify_with_weight_init(model.visual_encoder, args, model.freeze_vit, model.vit_precision)
+    model.visual_encoder = vit_modify_with_weight_init(model.visual_encoder, args, model.freeze_vit, model.vit_precision, derivative_info)
 
-    model.t5_model = t5_modify_with_weight_init(model.t5_model, args)
+    model.t5_model = t5_modify_with_weight_init(model.t5_model, args, derivative_info)
 
     distilled_total_size = sum(
         param.numel() for param in model.parameters()
