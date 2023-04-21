@@ -233,7 +233,11 @@ def vit_modify_with_weight_init(vit, petl_config, freeze_vit, precision, derivat
 
             if "prune" in petl_config.distillation_init:
                 if derivative_info is not None:
-                    derivative_info = {k[15:]: v for k, v in derivative_info.items() if k.startswith("visual_encoder.blocks")} # filter out some info that is not for this transformer
+                    derivative_info = {k[15:]: v for k, v in derivative_info.items() if k.startswith("visual_encoder")} # filter out some info that is not for this transformer
+
+                    for k, v in vit.state_dict().items():
+                        if k not in derivative_info:
+                            print(k, "not in derivative info")
 
                 if "mag_prune" in petl_config.distillation_init:
                     print("Apply magnitude pruning...")
