@@ -158,6 +158,10 @@ def parse_args():
         "--get_derivative_info", action="store_true"
     )
 
+    parser.add_argument(
+        "--get_activation_info", action="store_true"
+    )
+
     args = parser.parse_args()
     # if 'LOCAL_RANK' not in os.environ:
     #     os.environ['LOCAL_RANK'] = str(args.local_rank)
@@ -219,6 +223,23 @@ def main():
         print(f"Finish computing derivatice info, using {end - start:.3f}s")
         # for n, p in derivative_info.items():
         #     print(n, p.shape)
+
+    elif args.get_activation_info:
+        print("Setup for computing activation info")
+
+        runner = RunnerBase(
+            cfg=cfg, job_id=None, task=task, model=model, datasets=datasets
+        )
+
+        start = time.time()
+
+        print("Start to compute activation info")
+        activation_info = runner.get_activations(num_data=args.num_data, power=args.power)
+
+        derivative_info = runner.convert_activation_to_importance(activation_info)
+
+        end = time.time()
+        print(f"Finish computing activation info, using {end - start:.3f}s")
     else:
         derivative_info = None
 

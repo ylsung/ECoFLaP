@@ -11,6 +11,7 @@ import logging
 import os
 import time
 from pathlib import Path
+from collections import defaultdict
 
 import torch
 import torch.distributed as dist
@@ -437,7 +438,6 @@ class RunnerBase:
         for n, p in model.named_parameters():
             p.requires_grad = True
 
-
         batch_size_train_record = self.config.run_cfg.batch_size_train
         batch_size_eval_record = self.config.run_cfg.batch_size_eval
 
@@ -450,30 +450,6 @@ class RunnerBase:
 
         self.config.run_cfg.batch_size_train = batch_size_train_record
         self.config.run_cfg.batch_size_eval = batch_size_eval_record
-
-        # datasets = [self.datasets[split] for split in self.datasets]
-
-        # collate_fns = []
-        # batch_sizes = []
-        # is_trains = []
-        # for dataset in datasets:
-        #     if isinstance(dataset, tuple) or isinstance(dataset, list):
-        #         collate_fns.append([getattr(d, "collater", None) for d in dataset])
-        #     else:
-        #         collate_fns.append(getattr(dataset, "collater", None))
-
-        #     batch_sizes.append(1)
-        #     is_trains.append(False)
-
-        # data_loaders = self.create_loaders(
-        #     datasets=datasets,
-        #     num_workers=self.config.run_cfg.num_workers,
-        #     batch_sizes=batch_sizes,
-        #     is_trains=is_trains,
-        #     collate_fns=collate_fns,
-        # )
-
-        # data_loader = data_loaders[0]
 
         derivative_info = self.task.get_data_derivative(
             model=model, 
@@ -489,6 +465,142 @@ class RunnerBase:
             p.requires_grad = requires_grad_record[n]
 
         return derivative_info
+
+    def get_activations(self, num_data=128, power=2):
+        import transformers
+        import torch.nn.functional as F
+
+        model = self.unwrap_dist_model(self.model)
+        model.eval()
+
+        middle_representations = defaultdict(float)
+
+        if power == 1:
+            scale_method = torch.abs
+        elif power == 2:
+            scale_method = torch.square
+        else:
+            raise ValueError(f"power in `get_data_derivative` can only be 1 or 2, but got {power}")
+
+        def hook_func(module, input, output):
+            if isinstance(output, ((tuple, list))):
+                output = output[0]
+
+            if isinstance(
+                output, 
+                (transformers.modeling_outputs.BaseModelOutputWithPastAndCrossAttentions,
+                transformers.modeling_outputs.BaseModelOutputWithPoolingAndCrossAttentions)
+            ):
+                avg_output = scale_method(output.last_hidden_state).mean(1).sum(0)
+            elif isinstance(
+                output,
+                (transformers.modeling_outputs.Seq2SeqLMOutput)
+            ):
+                avg_output = scale_method(output.logits).mean(1).sum(0)
+            elif getattr(output, "shape", None) is None: # used for finding if any output format are not what we want
+                print(type(output))
+                print(output.keys())
+            elif len(output.shape) == 4:
+                # if it is conv # shape = (B, D, P, P)
+                avg_output = scale_method(output).mean(-1).mean(-1).sum(0)
+            else:
+                # shape = (B, L, D)
+
+                avg_output = scale_method(output).mean(1).sum(0)
+
+            # middle_representations.shape = (D, )
+            middle_representations[module.module_name] += avg_output.detach().cpu() / num_data
+
+            # add the attentino output that is not computed by module.
+            if module.module_name.startswith("visual_encoder") and module.module_name.endswith("attn"):
+                output = F.linear(input=input[0], weight=module.qkv.weight)
+
+                middle_representations[module.module_name + ".qkv"] += scale_method(output).mean(1).sum(0).detach().cpu() / num_data
+            
+
+        hooks = []
+        for name, module in model.named_modules():
+            # if any([name.endswith(n) for n in keys_to_track]):
+            module.module_name = name
+            hook = module.register_forward_hook(hook_func)
+            hooks.append(hook)
+
+        # doing the forward
+        batch_size_train_record = self.config.run_cfg.batch_size_train
+        batch_size_eval_record = self.config.run_cfg.batch_size_eval
+
+        batch_size = 16
+
+        self.config.run_cfg.batch_size_train = batch_size
+        self.config.run_cfg.batch_size_eval = batch_size
+
+        assert num_data % batch_size == 0, f"num_data should be dividable by {batch_size}."
+
+        split_name = self.test_splits[0]
+        data_loader = self.dataloaders.get(split_name, None)
+        assert data_loader, "data_loader for split {} is None.".format(split_name)
+
+        self.config.run_cfg.batch_size_train = batch_size_train_record
+        self.config.run_cfg.batch_size_eval = batch_size_eval_record
+
+        # get the activations by forwarding the data through the model
+        self.task.get_activations(
+            model=model, 
+            data_loader=data_loader, 
+            num_data=num_data, 
+            cuda_enabled=self.cuda_enabled
+        )
+
+        for h in hooks:
+            h.remove()
+
+        return middle_representations
+
+    def convert_activation_to_importance(self, middle_representations):
+        # Visual encoder
+
+        importance_measure = {}
+
+        model = self.unwrap_dist_model(self.model)
+
+        for n, p in model.named_parameters():
+            
+            is_weight = "weight" in n
+
+            n_no_postfix = n.replace(".weight", "") if is_weight else n.replace(".bias", "")
+
+            if "visual_encoder.cls_token" in n or "visual_encoder.pos_embed" in n:
+                importance = middle_representations["visual_encoder.pos_drop"].unsqueeze(0).unsqueeze(0)
+            elif "query_tokens" in n:
+                importance = middle_representations["Qformer.bert.embeddings.LayerNorm"].unsqueeze(0).unsqueeze(0)
+            elif "patch_embed.proj" in n:
+                importance = middle_representations[n_no_postfix]
+                if is_weight:
+                    importance = importance.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
+            elif ".shared." in n:
+                # embedding layers
+                importance = middle_representations[n_no_postfix].unsqueeze(0)
+            elif any(ln_n in n for ln_n in ["LayerNorm", "norm", "ln"]):
+                importance = middle_representations[n_no_postfix]
+            elif "q_bias" in n:
+                n_in_rep = n.replace("q_bias", "qkv")
+                importance = middle_representations[n_in_rep].chunk(3)[0]
+            elif "v_bias" in n:
+                n_in_rep = n.replace("v_bias", "qkv")
+                importance = middle_representations[n_in_rep].chunk(3)[-1]
+            else:
+                # linear weight
+                importance = middle_representations[n_no_postfix]
+                if is_weight:
+                    importance = importance.unsqueeze(-1)
+
+            # print(n, importance.shape, p.shape)
+
+            importance_measure[n] = importance.expand(p.shape)
+
+            assert importance_measure[n].shape == p.shape, f"{importance_measure[n].shape} is different from {p.shape}."
+
+        return importance_measure
 
     def train_epoch(self, epoch):
         # train

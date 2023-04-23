@@ -148,6 +148,19 @@ class BaseTask:
             accum_grad_iters=accum_grad_iters,
         )
 
+    def get_activations(self, model, data_loader, num_data=128, cuda_enabled=False):
+        idx = 0
+        for samples in data_loader:
+            samples = prepare_sample(samples, cuda_enabled=cuda_enabled)
+
+            logits = model.get_logits_without_labels(samples)["logits"]
+            idx += logits.shape[0]
+
+            print(idx)
+
+            if idx >= num_data:
+                break
+
     def get_data_derivative(self, model, data_loader, num_data=128, power=2, num_logits=1, cuda_enabled=False):
         metric_logger = MetricLogger(delimiter="  ")
         header = "Get data derivative"
