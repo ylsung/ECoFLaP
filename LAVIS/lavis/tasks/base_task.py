@@ -198,7 +198,7 @@ class BaseTask:
                     prob = probs[b, i]
 
                     for name, param in model.named_parameters():
-                        gradients_dict[name] += (prob * grad_method(param.grad)).cpu().data
+                        gradients_dict[name] += (prob * grad_method(param.grad)).cpu().data / num_data
 
                     model.zero_grad()
 
