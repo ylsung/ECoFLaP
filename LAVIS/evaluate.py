@@ -162,6 +162,10 @@ def parse_args():
         "--get_activation_info", action="store_true"
     )
 
+    parser.add_argument(
+        "--use_input_activation", action="store_true"
+    )
+
     args = parser.parse_args()
     # if 'LOCAL_RANK' not in os.environ:
     #     os.environ['LOCAL_RANK'] = str(args.local_rank)
@@ -234,9 +238,9 @@ def main():
         start = time.time()
 
         print("Start to compute activation info")
-        activation_info = runner.get_activations(num_data=args.num_data, power=args.power)
+        input_representations, output_representations = runner.get_activations(num_data=args.num_data, power=args.power)
 
-        derivative_info = runner.convert_activation_to_importance(activation_info)
+        derivative_info = runner.convert_activation_to_importance(input_representations, output_representations, args.use_input_activation)
 
         end = time.time()
         print(f"Finish computing activation info, using {end - start:.3f}s")

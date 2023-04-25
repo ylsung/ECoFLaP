@@ -841,7 +841,8 @@ def t5_modify_with_weight_init(transformer, petl_config, derivative_info=None, s
                     importance_measure,
                     res_keep_ratio, 
                     attn_keep_ratio, 
-                    ffn_keep_ratio
+                    ffn_keep_ratio,
+                    is_global="global" in petl_config.distillation_init,
                 )
 
             if "fusion" in petl_config.distillation_init:

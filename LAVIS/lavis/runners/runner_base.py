@@ -473,7 +473,8 @@ class RunnerBase:
         model = self.unwrap_dist_model(self.model)
         model.eval()
 
-        middle_representations = defaultdict(float)
+        output_representations = defaultdict(float)
+        input_representations = defaultdict(float)
 
         if power == 1:
             scale_method = torch.abs
@@ -482,7 +483,7 @@ class RunnerBase:
         else:
             raise ValueError(f"power in `get_data_derivative` can only be 1 or 2, but got {power}")
 
-        def hook_func(module, input, output):
+        def hook_func(module, args, output):
             if isinstance(output, ((tuple, list))):
                 output = output[0]
 
@@ -508,15 +509,44 @@ class RunnerBase:
 
                 avg_output = scale_method(output).mean(1).sum(0)
 
-            # middle_representations.shape = (D, )
-            middle_representations[module.module_name] += avg_output.detach().cpu() / num_data
+            # output_representations.shape = (D, )
+            output_representations[module.module_name] += avg_output.detach().cpu() / num_data
 
+            if isinstance(args, ((tuple, list))) and len(args) > 0:
+                input = args[0]
+            else:
+                input = torch.zeros(1, dtype=avg_output.dtype)
+                
+            if isinstance(input, torch.LongTensor):
+                input = torch.zeros(1)
+                print(module.module_name)
             # add the attentino output that is not computed by module.
             if module.module_name.startswith("visual_encoder") and module.module_name.endswith("attn"):
-                output = F.linear(input=input[0], weight=module.qkv.weight)
+                output = F.linear(input=input, weight=module.qkv.weight)
 
-                middle_representations[module.module_name + ".qkv"] += scale_method(output).mean(1).sum(0).detach().cpu() / num_data
-            
+                output_representations[module.module_name + ".qkv"] += scale_method(output).mean(1).sum(0).detach().cpu() / num_data
+
+            if len(input.shape) == 3: # norm input
+                avg_input = scale_method(input).mean(1).sum(0)
+            elif len(input.shape) == 1: # dummy input
+                avg_input = input
+            elif "visual_encoder.patch_embed" in module.module_name or "visual_encoder" == module.module_name:
+                avg_input = scale_method(input).mean(-1).mean(-1).sum(0)
+            elif "attn_drop" in module.module_name or "self.dropout" in module.module_name:
+                avg_input = scale_method(input).mean(1).mean(-1).sum(0) # may not be right, but this is not used so it is fine
+            elif any(n in module.module_name for n in [
+                "relative_attention_bias",
+                "t5_model.shared",
+            ]):
+                avg_input = torch.zeros(1, dtype=avg_output.dtype)
+            else:
+                print(module.module_name, input.shape)
+                raise ValueError(f"The `{module.module_name}` module is unseen and need manually definition.")
+
+            input_representations[module.module_name] += avg_input.detach().cpu() / num_data
+
+            if module.module_name.startswith("visual_encoder") and module.module_name.endswith("attn"):
+                input_representations[module.module_name + ".qkv"] += scale_method(input).mean(1).sum(0).detach().cpu() / num_data
 
         hooks = []
         for name, module in model.named_modules():
@@ -554,9 +584,9 @@ class RunnerBase:
         for h in hooks:
             h.remove()
 
-        return middle_representations
+        return input_representations, output_representations
 
-    def convert_activation_to_importance(self, middle_representations):
+    def convert_activation_to_importance(self, input_representations, output_representations, use_input_activation=False):
         # Visual encoder
 
         importance_measure = {}
@@ -569,34 +599,50 @@ class RunnerBase:
 
             n_no_postfix = n.replace(".weight", "") if is_weight else n.replace(".bias", "")
 
+            input_importance = None
             if "visual_encoder.cls_token" in n or "visual_encoder.pos_embed" in n:
-                importance = middle_representations["visual_encoder.pos_drop"].unsqueeze(0).unsqueeze(0)
+                importance = output_representations["visual_encoder.pos_drop"].unsqueeze(0).unsqueeze(0)
             elif "query_tokens" in n:
-                importance = middle_representations["Qformer.bert.embeddings.LayerNorm"].unsqueeze(0).unsqueeze(0)
+                importance = output_representations["Qformer.bert.embeddings.LayerNorm"].unsqueeze(0).unsqueeze(0)
             elif "patch_embed.proj" in n:
-                importance = middle_representations[n_no_postfix]
+                importance = output_representations[n_no_postfix]
                 if is_weight:
                     importance = importance.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
+
+                    # only weight will use input representation
+                    input_importance = input_representations[n_no_postfix]
+                    input_importance = input_importance.unsqueeze(0).unsqueeze(-1).unsqueeze(-1)
             elif ".shared." in n:
                 # embedding layers
-                importance = middle_representations[n_no_postfix].unsqueeze(0)
+                importance = output_representations[n_no_postfix].unsqueeze(0)
             elif any(ln_n in n for ln_n in ["LayerNorm", "norm", "ln"]):
-                importance = middle_representations[n_no_postfix]
+                importance = output_representations[n_no_postfix]
             elif "q_bias" in n:
                 n_in_rep = n.replace("q_bias", "qkv")
-                importance = middle_representations[n_in_rep].chunk(3)[0]
+                importance = output_representations[n_in_rep].chunk(3)[0]
             elif "v_bias" in n:
                 n_in_rep = n.replace("v_bias", "qkv")
-                importance = middle_representations[n_in_rep].chunk(3)[-1]
+                importance = output_representations[n_in_rep].chunk(3)[-1]
             else:
                 # linear weight
-                importance = middle_representations[n_no_postfix]
+                importance = output_representations[n_no_postfix]
+                
                 if is_weight:
                     importance = importance.unsqueeze(-1)
+
+                    # only weight will use input representation
+                    input_importance = input_representations[n_no_postfix]
+                    input_importance = input_importance.unsqueeze(0)
 
             # print(n, importance.shape, p.shape)
 
             importance_measure[n] = importance.expand(p.shape)
+
+            if use_input_activation and input_importance is not None:
+
+                # print(n, input_importance.shape, p.shape)
+                input_importance = input_importance.expand(p.shape)
+                importance_measure[n] = (importance_measure[n] + input_importance) / 2
 
             assert importance_measure[n].shape == p.shape, f"{importance_measure[n].shape} is different from {p.shape}."
 

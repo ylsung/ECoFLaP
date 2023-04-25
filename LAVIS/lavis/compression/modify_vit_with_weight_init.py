@@ -11,7 +11,8 @@ from collections import defaultdict
 from typing import NamedTuple
 
 from lavis.compression.weight_matching import permutation_spec_from_axes_to_perm, get_permuted_param, apply_permutation, ot_weight_fusion, apply_permutation_by_matrix
-from lavis.compression.structural_pruning import structural_pruning
+from lavis.compression.structural_pruning import structural_pruning, global_structural_pruning
+from lavis.compression.global_pruning_model_modifier.vit_model_modifier import vit_modify_global_pruning
 from lavis.models.blip2_models.blip2 import LayerNorm, disabled_train, Blip2Base
 
 from lavis.models.eva_vit import convert_weights_to_fp16
@@ -51,7 +52,7 @@ def get_vit_ps(num_layers, num_heads):
     return ps_dict
 
 
-def vit_pruning(vit, distilled_vit, importance_measure, res_keep_ratio, attn_keep_ratio, ffn_keep_ratio):
+def vit_pruning(vit, distilled_vit, importance_measure, res_keep_ratio, attn_keep_ratio, ffn_keep_ratio, is_global=False):
     state_dict = vit.state_dict()
 
     num_layers = vit.depth
@@ -74,7 +75,10 @@ def vit_pruning(vit, distilled_vit, importance_measure, res_keep_ratio, attn_kee
     # split weights for num_heads
     ignore_layers = []
 
-    perm = structural_pruning(ps, importance_measure, keep_ratio_dict, max_iter=100, silent=True)
+    if is_global:
+        perm = global_structural_pruning(ps, importance_measure, keep_ratio_dict, max_iter=100, silent=True)
+    else:
+        perm = structural_pruning(ps, importance_measure, keep_ratio_dict, max_iter=100, silent=True)
 
     ignore_layers_weights = {}
 
@@ -84,6 +88,9 @@ def vit_pruning(vit, distilled_vit, importance_measure, res_keep_ratio, attn_kee
     pruned_state_dict = apply_permutation(ps, perm, state_dict)
 
     pruned_state_dict.update(ignore_layers_weights)
+
+    if is_global:
+        distilled_vit = vit_modify_global_pruning(distilled_vit, pruned_state_dict)
 
     distilled_vit.load_state_dict(pruned_state_dict)
 
@@ -249,7 +256,7 @@ def vit_modify_with_weight_init(vit, petl_config, freeze_vit, precision, derivat
                     importance_measure = derivative_info
 
                 elif "obs_prune" in petl_config.distillation_init:
-                    print("Apply derivative pruning...")
+                    print("Apply OBS pruning...")
                     importance_measure = {k: (v ** 2) * derivative_info[k] for k, v in vit.state_dict().items()}
 
                 elif "zero_prune" in petl_config.distillation_init:
@@ -269,7 +276,8 @@ def vit_modify_with_weight_init(vit, petl_config, freeze_vit, precision, derivat
                     importance_measure,
                     res_keep_ratio, 
                     attn_keep_ratio, 
-                    ffn_keep_ratio
+                    ffn_keep_ratio,
+                    is_global="global" in petl_config.distillation_init,
                 )
 
             if "fusion" in petl_config.distillation_init:

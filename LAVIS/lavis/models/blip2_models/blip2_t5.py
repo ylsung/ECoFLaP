@@ -89,6 +89,8 @@ class Blip2T5(Blip2Base):
             t5_model, config=t5_config
         )
 
+        print(self.t5_model.config)
+
         for name, param in self.t5_model.named_parameters():
             param.requires_grad = False
             param.data = param.data.bfloat16()
