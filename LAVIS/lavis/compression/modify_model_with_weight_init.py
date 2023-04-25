@@ -821,7 +821,7 @@ def t5_modify_with_weight_init(transformer, petl_config, derivative_info=None, s
                     importance_measure = derivative_info
 
                 elif "obs_prune" in petl_config.distillation_init:
-                    print("Apply derivative pruning...")
+                    print("Apply OBS pruning...")
                     importance_measure = {k: (v ** 2) * derivative_info[k] for k, v in transformer.state_dict().items()}
 
                 elif "zero_prune" in petl_config.distillation_init:
