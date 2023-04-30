@@ -89,8 +89,6 @@ class Blip2T5(Blip2Base):
             t5_model, config=t5_config
         )
 
-        print(self.t5_model.config)
-
         for name, param in self.t5_model.named_parameters():
             param.requires_grad = False
             param.data = param.data.bfloat16()
@@ -98,6 +96,15 @@ class Blip2T5(Blip2Base):
         self.t5_proj = nn.Linear(
             self.Qformer.config.hidden_size, self.t5_model.config.hidden_size
         )
+
+
+        # for n, p in self.Qformer.state_dict().items():
+        #     print(n, p.shape)
+
+        # for n, p in self.t5_proj.state_dict().items():
+        #     print(n, p.shape)
+
+        # exit()
 
         self.max_txt_len = max_txt_len
         self.prompt = prompt

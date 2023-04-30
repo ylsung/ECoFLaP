@@ -514,7 +514,7 @@ def pruning(transformer, distilled_transformer, importance_measure, res_keep_rat
 
     distilled_transformer.load_state_dict(pruned_state_dict)
 
-    return distilled_transformer
+    return distilled_transformer, perm
 
 
 def fusion(transformer, distilled_transformer, distill_merge_ratio=0.5, exact=True, normalization=False, metric="dot", to_one=False, importance=False):

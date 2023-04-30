@@ -23,6 +23,7 @@ from lavis.datasets.builders.classification_builder import (
     SNLIVisualEntailmentBuilder,
 )
 from lavis.datasets.builders.imagefolder_builder import ImageNetBuilder
+from lavis.datasets.builders.cifar100_builder import CIFAR100Builder
 from lavis.datasets.builders.video_qa_builder import MSRVTTQABuilder, MSVDQABuilder
 from lavis.datasets.builders.vqa_builder import (
     COCOVQABuilder,
@@ -50,6 +51,7 @@ __all__ = [
     "Flickr30kBuilder",
     "GQABuilder",
     "ImageNetBuilder",
+    "CIFAR100Builder",
     "MSRVTTCapBuilder",
     "MSRVTTQABuilder",
     "MSRVTTRetrievalBuilder",

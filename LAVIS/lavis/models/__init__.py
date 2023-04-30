@@ -43,6 +43,7 @@ from lavis.models.img2prompt_models.img2prompt_vqa import Img2PromptVQA
 from lavis.models.med import XBertLMHeadDecoder
 from lavis.models.vit import VisionTransformerEncoder
 from lavis.models.clip_models.model import CLIP
+from lavis.models.clip_models.eva_model import EVA_CLIP
 
 from lavis.models.gpt_models.gpt_dialogue import GPTDialogue
 
@@ -78,6 +79,7 @@ __all__ = [
     "Img2PromptVQA",
     "PNPUnifiedQAv2FiD",
     "CLIP",
+    "EVA_CLIP",
     "VisionTransformerEncoder",
     "XBertLMHeadDecoder",
     "GPTDialogue",

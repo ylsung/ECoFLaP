@@ -64,10 +64,13 @@ class Mlp(nn.Module):
 class Attention(nn.Module):
     def __init__(
             self, dim, num_heads=8, qkv_bias=False, qk_scale=None, attn_drop=0.,
-            proj_drop=0., window_size=None, attn_head_dim=None):
+            proj_drop=0., window_size=None, attn_head_dim=None, attn_dim=None):
         super().__init__()
         self.num_heads = num_heads
-        head_dim = dim // num_heads
+
+        if attn_dim is None:
+            attn_dim = dim
+        head_dim = attn_dim // num_heads
         if attn_head_dim is not None:
             head_dim = attn_head_dim
         all_head_dim = head_dim * self.num_heads
@@ -152,12 +155,12 @@ class Block(nn.Module):
 
     def __init__(self, dim, num_heads, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop=0., attn_drop=0.,
                  drop_path=0., init_values=None, act_layer=nn.GELU, norm_layer=nn.LayerNorm,
-                 window_size=None, attn_head_dim=None):
+                 window_size=None, attn_head_dim=None, attn_dim=None):
         super().__init__()
         self.norm1 = norm_layer(dim)
         self.attn = Attention(
             dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale,
-            attn_drop=attn_drop, proj_drop=drop, window_size=window_size, attn_head_dim=attn_head_dim)
+            attn_drop=attn_drop, proj_drop=drop, window_size=window_size, attn_head_dim=attn_head_dim, attn_dim=attn_dim)
         # NOTE: drop path for stochastic depth, we shall see if this is better than dropout here
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
         self.norm2 = norm_layer(dim)
@@ -246,11 +249,11 @@ class RelativePositionBias(nn.Module):
 class VisionTransformer(nn.Module):
     """ Vision Transformer with support for patch or hybrid CNN input stage
     """
-    def __init__(self, img_size=224, patch_size=16, in_chans=3, num_classes=1000, embed_dim=768, depth=12,
+    def __init__(self, img_size=224, patch_size=16, in_chans=3, num_classes=-1, embed_dim=768, depth=12,
                  num_heads=12, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop_rate=0., attn_drop_rate=0.,
                  drop_path_rate=0., norm_layer=nn.LayerNorm, init_values=None,
                  use_abs_pos_emb=True, use_rel_pos_bias=False, use_shared_rel_pos_bias=False,
-                 use_mean_pooling=True, init_scale=0.001, use_checkpoint=False):
+                 use_mean_pooling=True, init_scale=0.001, use_checkpoint=False, attn_dim=None):
         super().__init__()
         self.image_size = img_size
         self.num_classes = num_classes
@@ -261,6 +264,7 @@ class VisionTransformer(nn.Module):
         self.img_size = img_size
         self.patch_size = patch_size
         self.drop_path_rate = drop_path_rate
+        self.attn_dim = attn_dim if attn_dim is not None else embed_dim
 
         self.patch_embed = PatchEmbed(
             img_size=img_size, patch_size=patch_size, in_chans=in_chans, embed_dim=embed_dim)
@@ -284,24 +288,34 @@ class VisionTransformer(nn.Module):
         self.blocks = nn.ModuleList([
             Block(
                 dim=embed_dim, num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, qk_scale=qk_scale,
-                drop=drop_rate, attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer,
+                drop=drop_rate, attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer, attn_dim=attn_dim,
                 init_values=init_values, window_size=self.patch_embed.patch_shape if use_rel_pos_bias else None)
             for i in range(depth)])
-#         self.norm = nn.Identity() if use_mean_pooling else norm_layer(embed_dim)
-#         self.fc_norm = norm_layer(embed_dim) if use_mean_pooling else None
-#         self.head = nn.Linear(embed_dim, num_classes) if num_classes > 0 else nn.Identity()
+
+        self.norm = None
+        self.fc_norm = None
+        self.head = None
+
+        if num_classes > 0: # for the eva CLIP
+            self.norm = nn.Identity() if use_mean_pooling else norm_layer(embed_dim)
+            self.fc_norm = norm_layer(embed_dim) if use_mean_pooling else None
+            self.head = nn.Linear(embed_dim, num_classes) if num_classes > 0 else nn.Identity()
 
         if self.pos_embed is not None:
             trunc_normal_(self.pos_embed, std=.02)
         trunc_normal_(self.cls_token, std=.02)
         # trunc_normal_(self.mask_token, std=.02)
-#         if isinstance(self.head, nn.Linear):
-#             trunc_normal_(self.head.weight, std=.02)
+        if self.head is not None:
+            if isinstance(self.head, nn.Linear):
+                trunc_normal_(self.head.weight, std=.02)
+
         self.apply(self._init_weights)
         self.fix_init_weight()
-#         if isinstance(self.head, nn.Linear):
-#             self.head.weight.data.mul_(init_scale)
-#             self.head.bias.data.mul_(init_scale)
+
+        if self.head is not None:
+            if isinstance(self.head, nn.Linear):
+                self.head.weight.data.mul_(init_scale)
+                self.head.bias.data.mul_(init_scale)
 
     def fix_init_weight(self):
         def rescale(param, layer_id):
@@ -343,18 +357,26 @@ class VisionTransformer(nn.Module):
                 x = checkpoint.checkpoint(blk, x, rel_pos_bias)
             else:
                 x = blk(x, rel_pos_bias)
-        return x
-#         x = self.norm(x)
 
-#         if self.fc_norm is not None:
-#             t = x[:, 1:, :]
-#             return self.fc_norm(t.mean(1))
-#         else:
-#             return x[:, 0]
+        if self.num_classes > 0:
+            # for EVA CLIP
+            x = self.norm(x)
+
+            if self.fc_norm is not None:
+                t = x[:, 1:, :]
+                return self.fc_norm(t.mean(1))
+            else:
+                return x[:, 0]
+
+        else:
+            # for BLIP-2
+            return x
 
     def forward(self, x):
         x = self.forward_features(x)
-#         x = self.head(x)
+
+        if self.num_classes > 0:
+            x = self.head(x)
         return x
 
     def get_intermediate_layers(self, x):

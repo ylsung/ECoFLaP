@@ -94,7 +94,7 @@ def vit_pruning(vit, distilled_vit, importance_measure, res_keep_ratio, attn_kee
 
     distilled_vit.load_state_dict(pruned_state_dict)
 
-    return distilled_vit
+    return distilled_vit, perm
 
 
 def vit_fusion(vit, distilled_vit, distill_merge_ratio=0.5, exact=True, normalization=False, metric="dot", to_one=False, importance=False):
@@ -146,6 +146,9 @@ def vit_modify_with_weight_init(vit, petl_config, freeze_vit, precision, derivat
     device = list(vit.parameters())[0].device
 
     vit.to("cpu")
+
+    vit_prune_indices = None
+
     if petl_config.vit_side_pretrained_weight is not None:
         num_layers, res_keep_ratio, attn_keep_ratio, ffn_keep_ratio = petl_config.vit_side_pretrained_weight.split("-")
 
@@ -157,6 +160,7 @@ def vit_modify_with_weight_init(vit, petl_config, freeze_vit, precision, derivat
             patch_size=vit.patch_size,
             use_mean_pooling=False,
             embed_dim=int(vit.embed_dim * res_keep_ratio),
+            attn_dim=int(vit.attn_dim * attn_keep_ratio),
             depth=num_layers,
             num_heads=vit.num_heads,
             mlp_ratio=vit.mlp_ratio * ffn_keep_ratio,
@@ -270,7 +274,7 @@ def vit_modify_with_weight_init(vit, petl_config, freeze_vit, precision, derivat
                 else:
                     raise ValueError("The pruning method is invalid.")
 
-                distilled_vit = vit_pruning(
+                distilled_vit, vit_prune_indices = vit_pruning(
                     vit, 
                     distilled_vit, 
                     importance_measure,
@@ -307,10 +311,11 @@ def vit_modify_with_weight_init(vit, petl_config, freeze_vit, precision, derivat
             print("freeze distilled vision encoder")
 
         del vit
-        return distilled_vit
+        return distilled_vit, vit_prune_indices
     
     vit.to(device)
-    return vit
+
+    return vit, vit_prune_indices
 
 
 if __name__ == "__main__":

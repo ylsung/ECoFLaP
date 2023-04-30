@@ -709,6 +709,8 @@ def t5_modify_with_weight_init(transformer, petl_config, derivative_info=None, s
 
     transformer.to("cpu")
 
+    t5_prune_indices = None
+
     if petl_config.side_pretrained_weight is not None:
 
         side_config = deepcopy(transformer.config)
@@ -835,7 +837,7 @@ def t5_modify_with_weight_init(transformer, petl_config, derivative_info=None, s
                 else:
                     raise ValueError("The pruning method is invalid.")
 
-                distilled_transformer = pruning(
+                distilled_transformer, t5_prune_indices = pruning(
                     transformer, 
                     distilled_transformer, 
                     importance_measure,
@@ -861,10 +863,10 @@ def t5_modify_with_weight_init(transformer, petl_config, derivative_info=None, s
         distilled_transformer.to(device)
 
         del transformer
-        return distilled_transformer
+        return distilled_transformer, t5_prune_indices
     
     transformer.to(device)
-    return transformer
+    return transformer, t5_prune_indices
 
 
 if __name__ == "__main__":

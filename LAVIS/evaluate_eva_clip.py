@@ -249,35 +249,35 @@ def main():
     else:
         derivative_info = None
 
-    orig_total_size = sum(
-        param.numel() for param in model.parameters()
-    )
+    # orig_total_size = sum(
+    #     param.numel() for param in model.parameters()
+    # )
 
-    model.visual_encoder, vit_prune_indices = vit_modify_with_weight_init(model.visual_encoder, args, model.freeze_vit, model.vit_precision, derivative_info)
+    # model.visual_encoder, vit_prune_indices = vit_modify_with_weight_init(model.visual_encoder, args, model.freeze_vit, model.vit_precision, derivative_info)
 
-    model.t5_model, t5_prune_indices = t5_modify_with_weight_init(model.t5_model, args, derivative_info)
+    # model.t5_model, t5_prune_indices = t5_modify_with_weight_init(model.t5_model, args, derivative_info)
 
-    model.Qformer, model.t5_proj = qformer_pruning(
-        model.Qformer, 
-        model.t5_proj, 
-        model.init_Qformer, 
-        vit_prune_indices["P_vit_res"] if vit_prune_indices is not None else None, 
-        t5_prune_indices["P_res"] if t5_prune_indices is not None else None
-    )
+    # model.Qformer, model.t5_proj = qformer_pruning(
+    #     model.Qformer, 
+    #     model.t5_proj, 
+    #     model.init_Qformer, 
+    #     vit_prune_indices["P_vit_res"] if vit_prune_indices is not None else None, 
+    #     t5_prune_indices["P_res"] if t5_prune_indices is not None else None
+    # )
 
-    distilled_total_size = sum(
-        param.numel() for param in model.parameters()
-    )
+    # distilled_total_size = sum(
+    #     param.numel() for param in model.parameters()
+    # )
 
-    for name, param in model.t5_model.named_parameters():
-        param.requires_grad = False
+    # for name, param in model.t5_model.named_parameters():
+    #     param.requires_grad = False
 
     runner = RunnerBase(
         cfg=cfg, job_id=job_id, task=task, model=model, datasets=datasets
     )
 
-    runner.orig_total_size = orig_total_size
-    runner.distilled_total_size = distilled_total_size
+    # runner.orig_total_size = orig_total_size
+    # runner.distilled_total_size = distilled_total_size
 
     runner.evaluate(skip_reload=True)
 
