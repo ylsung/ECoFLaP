@@ -332,6 +332,7 @@ class VisualTransformer(nn.Module):
         self.positional_embedding = nn.Parameter(
             scale * torch.randn((image_size // patch_size) ** 2 + 1, width)
         )
+
         self.ln_pre = LayerNorm(width)
 
         self.transformer = Transformer(width, layers, heads, act_layer=act_layer)
@@ -867,6 +868,7 @@ def build_model_from_openai_state_dict(state_dict: dict):
 
     convert_weights_to_fp16(model)
     model.load_state_dict(state_dict)
+
     return model.eval()
 
 

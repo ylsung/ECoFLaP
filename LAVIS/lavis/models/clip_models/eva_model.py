@@ -1,13 +1,17 @@
 """ CLIP Model
 Adapted from https://github.com/mlfoundations/open_clip
 """
+import re
+import json
 import math
+import logging
 from dataclasses import dataclass
 from typing import Tuple, Union, Callable, Optional
 from functools import partial
 import numpy as np
 from collections import OrderedDict
 from copy import deepcopy
+from pathlib import Path
 
 import torch
 import torch.nn.functional as F
@@ -29,6 +33,11 @@ OPENAI_DATASET_STD = (0.26862954, 0.26130258, 0.27577711)
 
 _MODEL_CONFIG_PATHS = [Path(__file__).parent.parent.parent / f"configs/models/eva_clip/"]
 _MODEL_CONFIGS = {}  # directory (model_name: config) of model architecture configs
+
+
+cifar100_template = [
+    lambda c: f"a photo of a {c}.",
+]
 
 
 def _natural_key(string_):
@@ -57,6 +66,11 @@ def _rescan_model_configs():
         k: v
         for k, v in sorted(_MODEL_CONFIGS.items(), key=lambda x: _natural_key(x[0]))
     }
+
+
+def list_models():
+    """ enumerate available model architectures based on config files """
+    return list(_MODEL_CONFIGS.keys())
 
 
 _rescan_model_configs()  # initial populate of model config registry
@@ -307,6 +321,7 @@ class CLIPVisionCfg:
     image_size: Union[Tuple[int, int], int] = 224
     layer_scale_init_value: float = None
     drop_path_rate:float = 0.
+    use_mean_pooling: bool = False
 
 
 @dataclass
@@ -322,8 +337,8 @@ class CLIPTextCfg:
 @registry.register_model("eva_clip_feature_extractor")
 class EVA_CLIP(BaseModel):
     PRETRAINED_MODEL_CONFIG_DICT = {
-        "EVA-CLIP-G-336": "configs/models/clip_vit_base32.yaml",
-        "EVA-CLIP-G": "configs/models/clip_vit_base32.yaml",
+        "EVA-CLIP-g-336": "configs/models/eva_clip_g_336.yaml",
+        "EVA-CLIP-g": "configs/models/eva_clip_g.yaml",
     }
 
     def __init__(
@@ -354,7 +369,7 @@ class EVA_CLIP(BaseModel):
             img_size=vision_cfg.image_size,
             patch_size=vision_cfg.patch_size,
             num_classes=embed_dim,
-            use_mean_pooling=False,
+            use_mean_pooling=vision_cfg.use_mean_pooling,
             init_values=vision_cfg.layer_scale_init_value,
             embed_dim=vision_cfg.width,
             depth=vision_cfg.layers,
@@ -518,7 +533,7 @@ class EVA_CLIP(BaseModel):
 
     @classmethod
     def default_config_path(cls, model_type="base"):
-        model_type = "EVA-CLIP-G" if model_type == "base" else model_type
+        model_type = "EVA-CLIP-g" if model_type == "base" else model_type
 
         assert (
             model_type in cls.PRETRAINED_MODEL_CONFIG_DICT
@@ -605,9 +620,53 @@ class EVA_CLIP(BaseModel):
         return sims_matrix_i2t.cpu().numpy(), sims_matrix_t2i.cpu().numpy()
 
 
+def load_state_dict(checkpoint_path: str, map_location: str='cpu', model_key='model|module|state_dict'):
+    checkpoint = torch.load(checkpoint_path, map_location=map_location)
+
+    for mk in model_key.split('|'):
+        if isinstance(checkpoint, dict) and mk in checkpoint:
+            state_dict = checkpoint[mk]
+            break
+        else:
+            state_dict = checkpoint
+    if next(iter(state_dict.items()))[0].startswith('module'):
+        state_dict = {k[7:]: v for k, v in state_dict.items()}
+    return state_dict
+
+
+def interpolate_pos_embed(model, checkpoint_model):
+
+    # for k, v in checkpoint_model.items():
+    #     print(k, v.shape)
+    # exit()
+    if 'visual.pos_embed' in checkpoint_model:
+        pos_embed_checkpoint = checkpoint_model['visual.pos_embed'].float()
+        embedding_size = pos_embed_checkpoint.shape[-1]
+        num_patches = model.visual.patch_embed.num_patches
+        num_extra_tokens = model.visual.pos_embed.shape[-2] - num_patches
+        # height (== width) for the checkpoint position embedding
+        orig_size = int((pos_embed_checkpoint.shape[-2] - num_extra_tokens) ** 0.5)
+        # height (== width) for the new position embedding
+        new_size = int(num_patches ** 0.5)
+        # class_token and dist_token are kept unchanged
+        if orig_size != new_size:
+            print("Position interpolate from %dx%d to %dx%d" % (orig_size, orig_size, new_size, new_size))
+            extra_tokens = pos_embed_checkpoint[:, :num_extra_tokens]
+            # only the position tokens are interpolated
+            pos_tokens = pos_embed_checkpoint[:, num_extra_tokens:]
+            pos_tokens = pos_tokens.reshape(-1, orig_size, orig_size, embedding_size).permute(0, 3, 1, 2)
+            pos_tokens = torch.nn.functional.interpolate(
+                pos_tokens, size=(new_size, new_size), mode='bicubic', align_corners=False)
+            pos_tokens = pos_tokens.permute(0, 2, 3, 1).flatten(1, 2)
+            new_pos_embed = torch.cat((extra_tokens, pos_tokens), dim=1)
+            checkpoint_model['visual.pos_embed'] = new_pos_embed
+
+
 def load_checkpoint(model, checkpoint_path, model_key="model|module|state_dict", strict=True):
-    print(checkpoint_path)
     state_dict = load_state_dict(checkpoint_path, model_key=model_key)
+
+    interpolate_pos_embed(model, state_dict)
+
     incompatible_keys = model.load_state_dict(state_dict, strict=strict)
     print(incompatible_keys)
     return incompatible_keys

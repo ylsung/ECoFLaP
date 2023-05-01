@@ -8,6 +8,7 @@
 import argparse
 import random
 import time
+import os
 
 import numpy as np
 import torch
@@ -168,6 +169,10 @@ def parse_args():
         "--use_input_activation", action="store_true"
     )
 
+    parser.add_argument(
+        "--save_pruned_indices", action="store_true"
+    )
+
     args = parser.parse_args()
     # if 'LOCAL_RANK' not in os.environ:
     #     os.environ['LOCAL_RANK'] = str(args.local_rank)
@@ -256,6 +261,21 @@ def main():
     model.visual_encoder, vit_prune_indices = vit_modify_with_weight_init(model.visual_encoder, args, model.freeze_vit, model.vit_precision, derivative_info)
 
     model.t5_model, t5_prune_indices = t5_modify_with_weight_init(model.t5_model, args, derivative_info)
+
+    if args.save_pruned_indices:
+
+        saved_folder = "pruned_indices"
+        os.makedirs(saved_folder, exist_ok=True)
+
+        pruned_indices = {
+            "t5": t5_prune_indices,
+            "vit": vit_prune_indices,
+        }
+
+        torch.save(pruned_indices, os.path.join(saved_folder, job_id + ".pth"))
+
+        exit()
+
 
     model.Qformer, model.t5_proj = qformer_pruning(
         model.Qformer, 
