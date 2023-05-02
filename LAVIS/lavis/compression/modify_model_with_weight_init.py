@@ -703,7 +703,7 @@ def weights_multiplication_from_different_layers(weights_to_distill, target_name
     return weights
 
 
-def t5_modify_with_weight_init(transformer, petl_config, derivative_info=None, sampled_loader=None):
+def t5_modify_with_weight_init(transformer, petl_config, derivative_info=None, sampled_loader=None, pruned_indices=None):
 
     device = list(transformer.parameters())[0].device
 
@@ -803,7 +803,20 @@ def t5_modify_with_weight_init(transformer, petl_config, derivative_info=None, s
                     petl_config.learnable_weight_type
                 )
 
-            if "prune" in petl_config.distillation_init:
+            if pruned_indices is not None:
+                print("Use pre-extracted pruned indices...")
+                distilled_transformer, t5_prune_indices = pruning(
+                    transformer, 
+                    distilled_transformer, 
+                    None,
+                    res_keep_ratio, 
+                    attn_keep_ratio, 
+                    ffn_keep_ratio,
+                    is_global="global" in petl_config.distillation_init,
+                    pruned_indices=pruned_indices,
+                )
+
+            elif "prune" in petl_config.distillation_init:
                 if derivative_info is not None:
                     derivative_info = {k[9:]: v for k, v in derivative_info.items() if k.startswith("t5_model")} # filter out some info that is not for this transformer
                     

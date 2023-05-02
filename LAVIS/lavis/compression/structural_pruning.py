@@ -416,7 +416,7 @@ def split_weights_for_heads(state_dict, ignore_layers, num_heads):
     return state_dict_with_split_heads
 
 
-def pruning(transformer, distilled_transformer, importance_measure, res_keep_ratio, attn_keep_ratio, ffn_keep_ratio, is_global=False):
+def pruning(transformer, distilled_transformer, importance_measure, res_keep_ratio, attn_keep_ratio, ffn_keep_ratio, is_global=False, pruned_indices=None):
     encoder_layers = transformer.config.num_layers
     decoder_layers = transformer.config.num_decoder_layers
     num_heads = transformer.config.num_heads
@@ -465,14 +465,16 @@ def pruning(transformer, distilled_transformer, importance_measure, res_keep_rat
         transformer.state_dict(), ignore_layers, num_heads
     )
 
-    importance_measure = split_weights_for_heads(
-        importance_measure, ignore_layers, num_heads
-    )
-    
-    if is_global:
-        perm = global_structural_pruning(ps, importance_measure, keep_ratio_dict, groups=groups, max_iter=100, silent=True)
+    if pruned_indices is not None:
+        perm = pruned_indices
     else:
-        perm = structural_pruning(ps, importance_measure, keep_ratio_dict, max_iter=100, silent=True)
+        importance_measure = split_weights_for_heads(
+            importance_measure, ignore_layers, num_heads
+        )
+        if is_global:
+            perm = global_structural_pruning(ps, importance_measure, keep_ratio_dict, groups=groups, max_iter=100, silent=True)
+        else:
+            perm = structural_pruning(ps, importance_measure, keep_ratio_dict, max_iter=100, silent=True)
 
     ignore_layers_weights = {}
 

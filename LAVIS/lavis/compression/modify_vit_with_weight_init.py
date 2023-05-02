@@ -18,7 +18,7 @@ from lavis.models.blip2_models.blip2 import LayerNorm, disabled_train, Blip2Base
 from lavis.models.eva_vit import convert_weights_to_fp16
 
 
-def get_vit_ps(num_layers, num_heads):
+def get_vit_ps(num_layers, num_heads, has_norm, has_fc_norm, has_head):
     ps_dict = {
         "cls_token": (None, None, "P_vit_res"),
         "pos_embed": (None, None, "P_vit_res"),
@@ -47,18 +47,35 @@ def get_vit_ps(num_layers, num_heads):
         **{f"blocks.{j}.mlp.fc2.bias": ("P_vit_res",) for j in range(num_layers)},
     }
 
+    if has_norm:
+        ps_dict["norm.weight"] = ("P_vit_res",)
+        ps_dict["norm.bias"] = ("P_vit_res",)
+    
+    if has_fc_norm:
+        ps_dict["fc_norm.weight"] = ("P_vit_res",)
+        ps_dict["fc_norm.bias"] = ("P_vit_res",)
+
+    if has_head:
+        ps_dict["head.weight"] = (None, "P_vit_res")
+        ps_dict["head.bias"] = (None,)
+
     # print(ps_dict)
 
     return ps_dict
 
 
-def vit_pruning(vit, distilled_vit, importance_measure, res_keep_ratio, attn_keep_ratio, ffn_keep_ratio, is_global=False):
+def vit_pruning(vit, distilled_vit, importance_measure, res_keep_ratio, attn_keep_ratio, ffn_keep_ratio, is_global=False, pruned_indices=None):
     state_dict = vit.state_dict()
 
     num_layers = vit.depth
     num_heads = vit.num_heads
 
-    ps_dict = get_vit_ps(num_layers, num_heads)
+    # for clip models, blip's vit does not have the following three
+    has_norm = getattr(distilled_vit, "norm", None)
+    has_fc_norm = getattr(distilled_vit, "fc_norm", None)
+    has_head = getattr(distilled_vit, "head", None)
+
+    ps_dict = get_vit_ps(num_layers, num_heads, has_norm, has_fc_norm, has_head)
     ps = permutation_spec_from_axes_to_perm(ps_dict)
 
     keep_ratio_dict = {}
@@ -75,10 +92,13 @@ def vit_pruning(vit, distilled_vit, importance_measure, res_keep_ratio, attn_kee
     # split weights for num_heads
     ignore_layers = []
 
-    if is_global:
-        perm = global_structural_pruning(ps, importance_measure, keep_ratio_dict, max_iter=100, silent=True)
+    if pruned_indices is not None:
+        perm = pruned_indices
     else:
-        perm = structural_pruning(ps, importance_measure, keep_ratio_dict, max_iter=100, silent=True)
+        if is_global:
+            perm = global_structural_pruning(ps, importance_measure, keep_ratio_dict, max_iter=100, silent=True)
+        else:
+            perm = structural_pruning(ps, importance_measure, keep_ratio_dict, max_iter=100, silent=True)
 
     ignore_layers_weights = {}
 
@@ -142,7 +162,7 @@ def vit_fusion(vit, distilled_vit, distill_merge_ratio=0.5, exact=True, normaliz
 
 
 
-def vit_modify_with_weight_init(vit, petl_config, freeze_vit, precision, derivative_info=None, sampled_loader=None):
+def vit_modify_with_weight_init(vit, petl_config, freeze_vit, precision, derivative_info=None, sampled_loader=None, pruned_indices=None):
     device = list(vit.parameters())[0].device
 
     vit.to("cpu")
@@ -163,6 +183,7 @@ def vit_modify_with_weight_init(vit, petl_config, freeze_vit, precision, derivat
             attn_dim=int(vit.attn_dim * attn_keep_ratio),
             depth=num_layers,
             num_heads=vit.num_heads,
+            num_classes=vit.num_classes,
             mlp_ratio=vit.mlp_ratio * ffn_keep_ratio,
             qkv_bias=True,
             drop_path_rate=vit.drop_path_rate,
@@ -242,7 +263,19 @@ def vit_modify_with_weight_init(vit, petl_config, freeze_vit, precision, derivat
             #         petl_config.learnable_weight_type
             #     )
 
-            if "prune" in petl_config.distillation_init:
+            if pruned_indices is not None:
+                print("Use pre-extracted pruned indices...")
+                distilled_vit, vit_prune_indices = vit_pruning(
+                    vit, 
+                    distilled_vit, 
+                    None,
+                    res_keep_ratio, 
+                    attn_keep_ratio, 
+                    ffn_keep_ratio,
+                    is_global="global" in petl_config.distillation_init,
+                    pruned_indices=pruned_indices,
+                )
+            elif "prune" in petl_config.distillation_init:
                 if derivative_info is not None:
                     derivative_info = {k[15:]: v for k, v in derivative_info.items() if k.startswith("visual_encoder")} # filter out some info that is not for this transformer
 
@@ -282,6 +315,7 @@ def vit_modify_with_weight_init(vit, petl_config, freeze_vit, precision, derivat
                     attn_keep_ratio, 
                     ffn_keep_ratio,
                     is_global="global" in petl_config.distillation_init,
+                    pruned_indices=None,
                 )
 
             if "fusion" in petl_config.distillation_init:

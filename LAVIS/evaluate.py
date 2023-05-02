@@ -274,6 +274,8 @@ def main():
 
         torch.save(pruned_indices, os.path.join(saved_folder, job_id + ".pth"))
 
+        print(os.path.join(saved_folder, job_id + ".pth"))
+
         exit()
 
 

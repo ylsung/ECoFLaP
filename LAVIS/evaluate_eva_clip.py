@@ -168,6 +168,10 @@ def parse_args():
         "--use_input_activation", action="store_true"
     )
 
+    parser.add_argument(
+        "--pruned_indices", type=str, default=None
+    )
+
     args = parser.parse_args()
     # if 'LOCAL_RANK' not in os.environ:
     #     os.environ['LOCAL_RANK'] = str(args.local_rank)
@@ -249,11 +253,21 @@ def main():
     else:
         derivative_info = None
 
+    pruned_indices = None
+    if args.pruned_indices is not None:
+        pruned_indices = torch.load(args.pruned_indices)
+
+        pruned_indices = pruned_indices["vit"]
+
+        p_device = pruned_indices[f"P_vit_ffn_38"].device
+        
+        pruned_indices[f"P_vit_ffn_39"] = pruned_indices[f"P_vit_ffn_38"]
+
     # orig_total_size = sum(
     #     param.numel() for param in model.parameters()
     # )
 
-    # model.visual_encoder, vit_prune_indices = vit_modify_with_weight_init(model.visual_encoder, args, model.freeze_vit, model.vit_precision, derivative_info)
+    model.visual, vit_prune_indices = vit_modify_with_weight_init(model.visual, args, False, "fp32", None, pruned_indices=pruned_indices)
 
     # model.t5_model, t5_prune_indices = t5_modify_with_weight_init(model.t5_model, args, derivative_info)
 
