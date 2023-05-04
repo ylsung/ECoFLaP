@@ -235,6 +235,9 @@ def main():
         print("Start to compute derivatice info")
         derivative_info = runner.get_data_derivative(num_data=args.num_data, power=args.power, num_logits=args.num_logits)
 
+        vit_derivative_info = {k[15:]: v for k, v in derivative_info.items() if k.startswith("visual_encoder")} # filter out some info that is not for this transformer
+        t5_derivative_info = {k[9:]: v for k, v in derivative_info.items() if k.startswith("t5_model")} # filter out some info that is not for this transformer
+
         end = time.time()
         print(f"Finish computing derivatice info, using {end - start:.3f}s")
         # for n, p in derivative_info.items():
@@ -254,19 +257,22 @@ def main():
 
         derivative_info = runner.convert_activation_to_importance(input_representations, output_representations, args.use_input_activation)
 
+        vit_derivative_info = {k[15:]: v for k, v in derivative_info.items() if k.startswith("visual_encoder")} # filter out some info that is not for this transformer
+        t5_derivative_info = {k[9:]: v for k, v in derivative_info.items() if k.startswith("t5_model")} # filter out some info that is not for this transformer
+
         end = time.time()
         print(f"Finish computing activation info, using {end - start:.3f}s")
     else:
         derivative_info = None
+        vit_derivative_info = None
+        t5_derivative_info = None
 
     orig_total_size = sum(
         param.numel() for param in model.parameters()
     )
-
-    vit_derivative_info = {k[15:]: v for k, v in derivative_info.items() if k.startswith("visual_encoder")} # filter out some info that is not for this transformer
+    
     model.visual_encoder, vit_prune_indices = vit_modify_with_weight_init(model.visual_encoder, args, model.freeze_vit, model.vit_precision, vit_derivative_info)
 
-    t5_derivative_info = {k[9:]: v for k, v in derivative_info.items() if k.startswith("t5_model")} # filter out some info that is not for this transformer
     model.t5_model, t5_prune_indices = t5_modify_with_weight_init(model.t5_model, args, t5_derivative_info)
 
     for name, param in model.t5_model.named_parameters():
