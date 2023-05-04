@@ -14,7 +14,7 @@ def unstrct_pruning(importance_measure, keys_to_prune, ignore_layers, ratio):
         if k in keys_to_prune and k not in ignore_layers:
             top_k = int(v.numel() * ratio)
 
-            _, top_indices = v.reshape(-1).topk(top_k, dim=-1)
+            _, top_indices = v.float().reshape(-1).topk(top_k, dim=-1)
 
             mask = torch.zeros((v.numel(),), dtype=bool, device=v.device) # 1D
             mask.scatter_(-1, top_indices, 1)
