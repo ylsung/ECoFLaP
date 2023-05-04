@@ -30,18 +30,18 @@ def unstrct_pruning(importance_measure, keys_to_prune, ignore_layers, ratio):
 
 def t5_unstrct_pruning(transformer, distilled_transformer, importance_measure, res_keep_ratio, attn_keep_ratio, ffn_keep_ratio, is_global=False, pruned_indices=None):
 
-    ignore_layers = [
-        "encoder.block.0.layer.0.SelfAttention.relative_attention_bias.weight",
-        "decoder.block.0.layer.0.SelfAttention.relative_attention_bias.weight",
-    ] # not used but may be used in the future
-
-    for k in importance_measure.keys():
-        if "layer_norm" in k:
-            ignore_layers.append(k)
-
     if pruned_indices is not None:
         mask = pruned_indices
     else:
+        ignore_layers = [
+            "encoder.block.0.layer.0.SelfAttention.relative_attention_bias.weight",
+            "decoder.block.0.layer.0.SelfAttention.relative_attention_bias.weight",
+        ] # not used but may be used in the future
+
+        for k in importance_measure.keys():
+            if "layer_norm" in k:
+                ignore_layers.append(k)
+
         if res_keep_ratio != 1:
             keys_to_prune = {k: 1 for k in importance_measure.keys()}
             ratio = res_keep_ratio

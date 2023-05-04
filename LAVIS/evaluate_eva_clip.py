@@ -8,10 +8,14 @@
 import argparse
 import random
 import time
+import re
 
 import numpy as np
 import torch
+import torch.nn as nn
 import torch.backends.cudnn as cudnn
+
+from functools import partial
 
 import lavis.tasks as tasks
 from lavis.common.config import Config
@@ -190,6 +194,30 @@ def setup_seeds(config):
     cudnn.deterministic = True
 
 
+def modify_distilled_clip(transformer, embed_dim, ffn_dim, layer_ids):
+
+    match_string = rf".*blocks.({'|'.join(layer_ids)})*"
+
+    for m_name, module in dict(transformer.named_modules()).items():
+        if re.fullmatch(match_string, m_name):
+            print(m_name)
+
+            module.mlp.fc1 = nn.Linear(embed_dim, ffn_dim)
+            module.mlp.fc2 = nn.Linear(ffn_dim, embed_dim)
+
+    return transformer
+
+
+def unstrct_generate_missing_mask(transformer, pruned_indices):
+
+    for name, param in dict(transformer.state_dict()).items():
+        if name not in pruned_indices:
+            # don't prune them if the index are not existed in the pre-trained weight
+            pruned_indices[name] = torch.ones_like(param, device=param.device, dtype=bool)
+
+    return pruned_indices
+
+
 def main():
     # allow auto-dl completes on main process without timeout when using NCCL backend.
     # os.environ["NCCL_BLOCKING_WAIT"] = "1"
@@ -216,6 +244,10 @@ def main():
     task = tasks.setup_task(cfg)
     datasets = task.build_datasets(cfg)
     model = task.build_model(cfg)
+
+    is_strct_pruning = False
+    if args.distillation_init is not None:
+        is_strct_pruning = "unstrct" in args.distillation_init
 
     if args.get_derivative_info:
         print("Setup for computing derivatice info")
@@ -254,20 +286,37 @@ def main():
         derivative_info = None
 
     pruned_indices = None
+    distilled_modify_func = None
     if args.pruned_indices is not None:
         pruned_indices = torch.load(args.pruned_indices)
 
         pruned_indices = pruned_indices["vit"]
 
-        p_device = pruned_indices[f"P_vit_ffn_38"].device
-        
-        pruned_indices[f"P_vit_ffn_39"] = pruned_indices[f"P_vit_ffn_38"]
+
+        if is_strct_pruning:
+            pruned_indices = unstrct_generate_missing_mask(model.visual, pruned_indices)
+        else:
+            p_device = pruned_indices[f"P_vit_ffn_38"].device
+            
+            # pruned_indices[f"P_vit_ffn_39"] = pruned_indices[f"P_vit_ffn_38"]
+            
+            ffn_dim = int(model.visual.embed_dim * model.visual.mlp_ratio)
+            embed_dim = len(pruned_indices[f"P_vit_res"])
+
+            pruned_indices[f"P_vit_ffn_39"] = torch.arange(ffn_dim).to(p_device)
+
+            distilled_modify_func = partial(
+                modify_distilled_clip, 
+                embed_dim=embed_dim, 
+                ffn_dim=ffn_dim, 
+                layer_ids=['39'],
+            )
 
     # orig_total_size = sum(
     #     param.numel() for param in model.parameters()
     # )
 
-    model.visual, vit_prune_indices = vit_modify_with_weight_init(model.visual, args, False, "fp32", None, pruned_indices=pruned_indices)
+    model.visual, vit_prune_indices = vit_modify_with_weight_init(model.visual, args, False, "fp32", None, pruned_indices=pruned_indices, distilled_modify_func=distilled_modify_func)
 
     # model.t5_model, t5_prune_indices = t5_modify_with_weight_init(model.t5_model, args, derivative_info)
 

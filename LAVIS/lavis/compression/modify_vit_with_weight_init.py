@@ -164,16 +164,16 @@ def vit_fusion(vit, distilled_vit, distill_merge_ratio=0.5, exact=True, normaliz
 
 def vit_unstrct_pruning(vit, distilled_vit, importance_measure, res_keep_ratio, attn_keep_ratio, ffn_keep_ratio, is_global=False, pruned_indices=None):
 
-    ignore_layers = [
-    ] # not used but may be used in the future
-
-    for k in importance_measure.keys():
-        if ".norm" in k:
-            ignore_layers.append(k)
-
     if pruned_indices is not None:
         mask = pruned_indices
     else:
+        ignore_layers = [
+        ] # not used but may be used in the future
+
+        for k in importance_measure.keys():
+            if ".norm" in k:
+                ignore_layers.append(k)
+
         if res_keep_ratio != 1:
             keys_to_prune = {k: 1 for k in importance_measure.keys()}
             ratio = res_keep_ratio
@@ -200,7 +200,7 @@ def vit_unstrct_pruning(vit, distilled_vit, importance_measure, res_keep_ratio, 
 
 
 
-def vit_modify_with_weight_init(vit, petl_config, freeze_vit, precision, derivative_info=None, sampled_loader=None, pruned_indices=None):
+def vit_modify_with_weight_init(vit, petl_config, freeze_vit, precision, derivative_info=None, sampled_loader=None, pruned_indices=None, distilled_modify_func=None):
     device = list(vit.parameters())[0].device
 
     vit.to("cpu")
@@ -246,6 +246,9 @@ def vit_modify_with_weight_init(vit, petl_config, freeze_vit, precision, derivat
                 norm_layer=partial(nn.LayerNorm, eps=1e-6),
                 use_checkpoint=vit.use_checkpoint,
             )
+
+        if distilled_modify_func is not None:
+            distilled_vit = distilled_modify_func(distilled_vit)
 
         print(vit.depth, distilled_vit.depth)
 
