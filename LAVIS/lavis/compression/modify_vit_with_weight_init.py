@@ -12,6 +12,7 @@ from typing import NamedTuple
 
 from lavis.compression.weight_matching import permutation_spec_from_axes_to_perm, get_permuted_param, apply_permutation, ot_weight_fusion, apply_permutation_by_matrix
 from lavis.compression.structural_pruning import structural_pruning, global_structural_pruning
+from lavis.compression.unstructural_pruning import unstrct_pruning
 from lavis.compression.global_pruning_model_modifier.vit_model_modifier import vit_modify_global_pruning
 from lavis.models.blip2_models.blip2 import LayerNorm, disabled_train, Blip2Base
 
@@ -161,6 +162,43 @@ def vit_fusion(vit, distilled_vit, distill_merge_ratio=0.5, exact=True, normaliz
     return distilled_vit
 
 
+def vit_unstrct_pruning(vit, distilled_vit, importance_measure, res_keep_ratio, attn_keep_ratio, ffn_keep_ratio, is_global=False, pruned_indices=None):
+
+    ignore_layers = [
+    ] # not used but may be used in the future
+
+    for k in importance_measure.keys():
+        if ".norm" in k:
+            ignore_layers.append(k)
+
+    if pruned_indices is not None:
+        mask = pruned_indices
+    else:
+        if res_keep_ratio != 1:
+            keys_to_prune = {k: 1 for k in importance_measure.keys()}
+            ratio = res_keep_ratio
+        elif attn_keep_ratio != 1:
+            keys_to_prune = {k: 1 for k in importance_measure.keys() if ".attn." in k}
+            ratio = attn_keep_ratio
+        elif ffn_keep_ratio:
+            keys_to_prune = {k: 1 for k in importance_measure.keys() if ".mlp.fc" in k}
+            ratio = ffn_keep_ratio
+
+        mask = unstrct_pruning(importance_measure, keys_to_prune, ignore_layers, ratio)
+
+        # if is_global:
+        #     distilled_vit = t5_modify_global_pruning(distilled_vit, pruned_state_dict)
+
+    pruned_state_dict = {}
+
+    for k, v in vit.state_dict().items():
+        pruned_state_dict[k] = v * mask[k].type(v.dtype)
+
+    distilled_vit.load_state_dict(pruned_state_dict)
+
+    return distilled_vit, mask
+
+
 
 def vit_modify_with_weight_init(vit, petl_config, freeze_vit, precision, derivative_info=None, sampled_loader=None, pruned_indices=None):
     device = list(vit.parameters())[0].device
@@ -170,26 +208,44 @@ def vit_modify_with_weight_init(vit, petl_config, freeze_vit, precision, derivat
     vit_prune_indices = None
 
     if petl_config.vit_side_pretrained_weight is not None:
+        is_strct_pruning = "unstrct" in petl_config.distillation_init
         num_layers, res_keep_ratio, attn_keep_ratio, ffn_keep_ratio = petl_config.vit_side_pretrained_weight.split("-")
 
         num_layers = int(num_layers)
         res_keep_ratio, attn_keep_ratio, ffn_keep_ratio = float(res_keep_ratio), float(attn_keep_ratio), float(ffn_keep_ratio)
 
-        distilled_vit = vit.__class__(
-            img_size=vit.img_size,
-            patch_size=vit.patch_size,
-            use_mean_pooling=False,
-            embed_dim=int(vit.embed_dim * res_keep_ratio),
-            attn_dim=int(vit.attn_dim * attn_keep_ratio),
-            depth=num_layers,
-            num_heads=vit.num_heads,
-            num_classes=vit.num_classes,
-            mlp_ratio=vit.mlp_ratio * ffn_keep_ratio,
-            qkv_bias=True,
-            drop_path_rate=vit.drop_path_rate,
-            norm_layer=partial(nn.LayerNorm, eps=1e-6),
-            use_checkpoint=vit.use_checkpoint,
-        )
+        if is_strct_pruning:
+            distilled_vit = vit.__class__(
+                img_size=vit.img_size,
+                patch_size=vit.patch_size,
+                use_mean_pooling=False,
+                embed_dim=vit.embed_dim,
+                attn_dim=vit.attn_dim,
+                depth=num_layers,
+                num_heads=vit.num_heads,
+                num_classes=vit.num_classes,
+                mlp_ratio=vit.mlp_ratio,
+                qkv_bias=True,
+                drop_path_rate=vit.drop_path_rate,
+                norm_layer=partial(nn.LayerNorm, eps=1e-6),
+                use_checkpoint=vit.use_checkpoint,
+            )
+        else:
+            distilled_vit = vit.__class__(
+                img_size=vit.img_size,
+                patch_size=vit.patch_size,
+                use_mean_pooling=False,
+                embed_dim=int(vit.embed_dim * res_keep_ratio),
+                attn_dim=int(vit.attn_dim * attn_keep_ratio),
+                depth=num_layers,
+                num_heads=vit.num_heads,
+                num_classes=vit.num_classes,
+                mlp_ratio=vit.mlp_ratio * ffn_keep_ratio,
+                qkv_bias=True,
+                drop_path_rate=vit.drop_path_rate,
+                norm_layer=partial(nn.LayerNorm, eps=1e-6),
+                use_checkpoint=vit.use_checkpoint,
+            )
 
         print(vit.depth, distilled_vit.depth)
 
@@ -265,58 +321,79 @@ def vit_modify_with_weight_init(vit, petl_config, freeze_vit, precision, derivat
 
             if pruned_indices is not None:
                 print("Use pre-extracted pruned indices...")
-                distilled_vit, vit_prune_indices = vit_pruning(
-                    vit, 
-                    distilled_vit, 
-                    None,
-                    res_keep_ratio, 
-                    attn_keep_ratio, 
-                    ffn_keep_ratio,
-                    is_global="global" in petl_config.distillation_init,
-                    pruned_indices=pruned_indices,
-                )
+
+                if is_strct_pruning:
+                    distilled_vit, vit_prune_indices = vit_unstrct_pruning(
+                        vit, 
+                        distilled_vit, 
+                        None,
+                        res_keep_ratio, 
+                        attn_keep_ratio, 
+                        ffn_keep_ratio,
+                        is_global="global" in petl_config.distillation_init,
+                        pruned_indices=pruned_indices,
+                    )
+                else:
+                    distilled_vit, vit_prune_indices = vit_pruning(
+                        vit, 
+                        distilled_vit, 
+                        None,
+                        res_keep_ratio, 
+                        attn_keep_ratio, 
+                        ffn_keep_ratio,
+                        is_global="global" in petl_config.distillation_init,
+                        pruned_indices=pruned_indices,
+                    )
             elif "prune" in petl_config.distillation_init:
                 if derivative_info is not None:
-                    derivative_info = {k[15:]: v for k, v in derivative_info.items() if k.startswith("visual_encoder")} # filter out some info that is not for this transformer
-
                     for k, v in vit.state_dict().items():
                         if k not in derivative_info:
                             print(k, "not in derivative info")
 
                 if "mag_prune" in petl_config.distillation_init:
-                    print("Apply magnitude pruning...")
                     # using square of magnitude as the measure.
                     importance_measure = {k: v ** 2 for k, v in vit.state_dict().items()}
 
                 elif "derv_prune" in petl_config.distillation_init:
-                    print("Apply derivative pruning...")
                     importance_measure = derivative_info
 
                 elif "obs_prune" in petl_config.distillation_init:
-                    print("Apply OBS pruning...")
                     importance_measure = {k: (v ** 2) * derivative_info[k] for k, v in vit.state_dict().items()}
 
                 elif "zero_prune" in petl_config.distillation_init:
-                    print("Apply zero pruning (all the importance is zero)...")
                     importance_measure = {k: torch.zeros_like(v) for k, v in vit.state_dict().items()}
 
                 elif "rand_prune" in petl_config.distillation_init:
-                    print("Apply random pruning (all the importance is random)...")
+                    # (all the importance is random)
                     importance_measure = {k: torch.randn_like(v) for k, v in vit.state_dict().items()}
 
                 else:
                     raise ValueError("The pruning method is invalid.")
 
-                distilled_vit, vit_prune_indices = vit_pruning(
-                    vit, 
-                    distilled_vit, 
-                    importance_measure,
-                    res_keep_ratio, 
-                    attn_keep_ratio, 
-                    ffn_keep_ratio,
-                    is_global="global" in petl_config.distillation_init,
-                    pruned_indices=None,
-                )
+                print(f"Apply {petl_config.distillation_init}...")
+
+                if is_strct_pruning:
+                    distilled_vit, vit_prune_indices = vit_unstrct_pruning(
+                        vit, 
+                        distilled_vit, 
+                        importance_measure,
+                        res_keep_ratio, 
+                        attn_keep_ratio, 
+                        ffn_keep_ratio,
+                        is_global="global" in petl_config.distillation_init,
+                        pruned_indices=None,
+                    )
+                else:
+                    distilled_vit, vit_prune_indices = vit_pruning(
+                        vit, 
+                        distilled_vit, 
+                        importance_measure,
+                        res_keep_ratio, 
+                        attn_keep_ratio, 
+                        ffn_keep_ratio,
+                        is_global="global" in petl_config.distillation_init,
+                        pruned_indices=None,
+                    )
 
             if "fusion" in petl_config.distillation_init:
                 print("Apply fusion on ViT...")
@@ -361,7 +438,7 @@ if __name__ == "__main__":
 
     class Config:
         vit_side_pretrained_weight = "39-1.0-1.0-0.5"
-        distillation_init = "mag_prune"
+        distillation_init = "unstrct_mag_prune"
         distill_merge_ratio = 0.5
         exact = True
         normalization = False
@@ -380,9 +457,9 @@ if __name__ == "__main__":
 
     old_output = vit(x)
 
-    derivative_info = {k: v ** 2 for k, v in vit.named_parameters()}
+    derivative_info = {k: v ** 2 for k, v in vit.state_dict().items()}
 
-    vit = vit_modify_with_weight_init(vit, config, True, "fp32", derivative_info)
+    vit, _ = vit_modify_with_weight_init(vit, config, True, "fp32", derivative_info)
 
     new_output = vit(x)
 

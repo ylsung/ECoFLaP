@@ -21,6 +21,7 @@ from collections import defaultdict
 from lavis.compression.learnable_merge import t5_modify_for_learnable_merge, convert_to_normal_save_weights
 from lavis.compression.weight_matching import permute_based_on_first_layer, permute_based_on_block
 from lavis.compression.structural_pruning import pruning, get_pruned_dim, fusion
+from lavis.compression.unstructural_pruning import t5_unstrct_pruning
 
 def get_activations(transformer, sampled_loader, distilled_block_ids, cache_type="representations"):
     assert cache_type in ["representations", "input_gram", "input_output_gram"]
@@ -712,6 +713,7 @@ def t5_modify_with_weight_init(transformer, petl_config, derivative_info=None, s
     t5_prune_indices = None
 
     if petl_config.side_pretrained_weight is not None:
+        is_strct_pruning = "unstrct" in petl_config.distillation_init
 
         side_config = deepcopy(transformer.config)
 
@@ -723,9 +725,16 @@ def t5_modify_with_weight_init(transformer, petl_config, derivative_info=None, s
         side_config.num_decoder_layers = num_layers
         side_config.num_layers = num_layers
 
-        side_config.d_model = get_pruned_dim(side_config.d_model, res_keep_ratio)
-        side_config.d_ff = get_pruned_dim(side_config.d_ff, ffn_keep_ratio)
-        side_config.d_kv = get_pruned_dim(side_config.d_kv, attn_keep_ratio)
+        if is_strct_pruning:
+            # unstructural
+            side_config.d_model = side_config.d_model
+            side_config.d_ff = side_config.d_ff
+            side_config.d_kv = side_config.d_kv
+        else:
+            # structural
+            side_config.d_model = get_pruned_dim(side_config.d_model, res_keep_ratio)
+            side_config.d_ff = get_pruned_dim(side_config.d_ff, ffn_keep_ratio)
+            side_config.d_kv = get_pruned_dim(side_config.d_kv, attn_keep_ratio)
 
         distilled_transformer = transformer.__class__(side_config)
 
@@ -805,21 +814,31 @@ def t5_modify_with_weight_init(transformer, petl_config, derivative_info=None, s
 
             if pruned_indices is not None:
                 print("Use pre-extracted pruned indices...")
-                distilled_transformer, t5_prune_indices = pruning(
-                    transformer, 
-                    distilled_transformer, 
-                    None,
-                    res_keep_ratio, 
-                    attn_keep_ratio, 
-                    ffn_keep_ratio,
-                    is_global="global" in petl_config.distillation_init,
-                    pruned_indices=pruned_indices,
-                )
+                if is_strct_pruning:
+                    distilled_transformer, t5_prune_indices = t5_unstrct_pruning(
+                        transformer, 
+                        distilled_transformer, 
+                        None,
+                        res_keep_ratio, 
+                        attn_keep_ratio, 
+                        ffn_keep_ratio,
+                        is_global="global" in petl_config.distillation_init,
+                        pruned_indices=pruned_indices,
+                    )
+                else:    
+                    distilled_transformer, t5_prune_indices = pruning(
+                        transformer, 
+                        distilled_transformer, 
+                        None,
+                        res_keep_ratio, 
+                        attn_keep_ratio, 
+                        ffn_keep_ratio,
+                        is_global="global" in petl_config.distillation_init,
+                        pruned_indices=pruned_indices,
+                    )
 
             elif "prune" in petl_config.distillation_init:
                 if derivative_info is not None:
-                    derivative_info = {k[9:]: v for k, v in derivative_info.items() if k.startswith("t5_model")} # filter out some info that is not for this transformer
-                    
                     # add back some weight which is shared-weight
                     for n, p in transformer.state_dict().items():
                         if n not in derivative_info: # those are shared embeddings
@@ -827,38 +846,47 @@ def t5_modify_with_weight_init(transformer, petl_config, derivative_info=None, s
                             derivative_info[n] = derivative_info["shared.weight"]
 
                 if "mag_prune" in petl_config.distillation_init:
-                    print("Apply magnitude pruning...")
                     # using square of magnitude as the measure.
                     importance_measure = {k: v ** 2 for k, v in transformer.state_dict().items()}
 
                 elif "derv_prune" in petl_config.distillation_init:
-                    print("Apply derivative pruning...")
                     importance_measure = derivative_info
 
                 elif "obs_prune" in petl_config.distillation_init:
-                    print("Apply OBS pruning...")
                     importance_measure = {k: (v ** 2) * derivative_info[k] for k, v in transformer.state_dict().items()}
 
                 elif "zero_prune" in petl_config.distillation_init:
-                    print("Apply zero pruning (all the importance is zero)...")
                     importance_measure = {k: torch.zeros_like(v) for k, v in transformer.state_dict().items()}
 
                 elif "rand_prune" in petl_config.distillation_init:
-                    print("Apply random pruning (all the importance is random)...")
+                    # all the importance is random
                     importance_measure = {k: torch.randn_like(v) for k, v in transformer.state_dict().items()}
 
                 else:
                     raise ValueError("The pruning method is invalid.")
 
-                distilled_transformer, t5_prune_indices = pruning(
-                    transformer, 
-                    distilled_transformer, 
-                    importance_measure,
-                    res_keep_ratio, 
-                    attn_keep_ratio, 
-                    ffn_keep_ratio,
-                    is_global="global" in petl_config.distillation_init,
-                )
+                print(f"Apply {petl_config.distillation_init}...")
+
+                if is_strct_pruning:
+                    distilled_transformer, t5_prune_indices = t5_unstrct_pruning(
+                        transformer, 
+                        distilled_transformer, 
+                        importance_measure,
+                        res_keep_ratio, 
+                        attn_keep_ratio, 
+                        ffn_keep_ratio,
+                        is_global="global" in petl_config.distillation_init,
+                    )
+                else:
+                    distilled_transformer, t5_prune_indices = pruning(
+                        transformer, 
+                        distilled_transformer, 
+                        importance_measure,
+                        res_keep_ratio, 
+                        attn_keep_ratio, 
+                        ffn_keep_ratio,
+                        is_global="global" in petl_config.distillation_init,
+                    )
 
             if "fusion" in petl_config.distillation_init:
                 print("Apply fusion...")
@@ -911,8 +939,8 @@ if __name__ == "__main__":
             self.hard_prompt = None # "Find the relationship between the two concatenated sentences, or classify it if there is only one sentence."
             self.init_from_emb = True
 
-            self.side_pretrained_weight = "6-1.0-1.0-0.5"
-            self.distillation_init = "mag_prune"
+            self.side_pretrained_weight = "6-0.8-1.0-1.0"
+            self.distillation_init = "unstrct_mag_prune"
             self.distilled_block_ids = "[[0,1,2,3],[2,3,4,5],[4,5,6,7],[6,7,8,9],[8,9,10,11],[10,11]]" # "[0,1,2,3,4,[5,6,7,8,9,10,11]]" # "[[0,1],[2,3],[4,5],[6,7],[8,9],[10,11]]" "[0,1,2,[3,4,5],[6,7,8],[9,10,11]]"
             self.distilled_block_weights = None
             self.rep_stack_forward = True
@@ -994,9 +1022,9 @@ if __name__ == "__main__":
     else:
         sampled_loader = None
     
-    derivative_info = {k: v ** 2 for k, v in model.named_parameters()}
+    derivative_info = {k: v ** 2 for k, v in model.state_dict().items()}
 
-    model = t5_modify_with_weight_init(model, config, derivative_info, sampled_loader)
+    model, _ = t5_modify_with_weight_init(model, config, derivative_info, sampled_loader)
     new_param = model.state_dict()
     # for i in new_param.keys():
     #     print(i)

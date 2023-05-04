@@ -218,6 +218,11 @@ def main():
     datasets = task.build_datasets(cfg)
     model = task.build_model(cfg)
 
+
+    is_strct_pruning = False
+    if args.distillation_init is not None:
+        is_strct_pruning = "unstrct" in args.distillation_init
+
     if args.get_derivative_info:
         print("Setup for computing derivatice info")
 
@@ -258,9 +263,14 @@ def main():
         param.numel() for param in model.parameters()
     )
 
-    model.visual_encoder, vit_prune_indices = vit_modify_with_weight_init(model.visual_encoder, args, model.freeze_vit, model.vit_precision, derivative_info)
+    vit_derivative_info = {k[15:]: v for k, v in derivative_info.items() if k.startswith("visual_encoder")} # filter out some info that is not for this transformer
+    model.visual_encoder, vit_prune_indices = vit_modify_with_weight_init(model.visual_encoder, args, model.freeze_vit, model.vit_precision, vit_derivative_info)
 
-    model.t5_model, t5_prune_indices = t5_modify_with_weight_init(model.t5_model, args, derivative_info)
+    t5_derivative_info = {k[9:]: v for k, v in derivative_info.items() if k.startswith("t5_model")} # filter out some info that is not for this transformer
+    model.t5_model, t5_prune_indices = t5_modify_with_weight_init(model.t5_model, args, t5_derivative_info)
+
+    for name, param in model.t5_model.named_parameters():
+        param.requires_grad = False
 
     if args.save_pruned_indices:
 
@@ -278,21 +288,23 @@ def main():
 
         exit()
 
+    if is_strct_pruning:
+        distilled_total_size = sum(
+            (param != 0).float().sum() for param in model.parameters()
+        )
+    else:
+        # only prune qformer for structural pruning
+        model.Qformer, model.t5_proj = qformer_pruning(
+            model.Qformer, 
+            model.t5_proj, 
+            model.init_Qformer, 
+            vit_prune_indices["P_vit_res"] if vit_prune_indices is not None else None, 
+            t5_prune_indices["P_res"] if t5_prune_indices is not None else None
+        )
 
-    model.Qformer, model.t5_proj = qformer_pruning(
-        model.Qformer, 
-        model.t5_proj, 
-        model.init_Qformer, 
-        vit_prune_indices["P_vit_res"] if vit_prune_indices is not None else None, 
-        t5_prune_indices["P_res"] if t5_prune_indices is not None else None
-    )
-
-    distilled_total_size = sum(
-        param.numel() for param in model.parameters()
-    )
-
-    for name, param in model.t5_model.named_parameters():
-        param.requires_grad = False
+        distilled_total_size = sum(
+            param.numel() for param in model.parameters()
+        )
 
     runner = RunnerBase(
         cfg=cfg, job_id=job_id, task=task, model=model, datasets=datasets
