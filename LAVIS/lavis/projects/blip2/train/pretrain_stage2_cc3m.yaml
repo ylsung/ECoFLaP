@@ -21,6 +21,9 @@ datasets:
     text_processor:
         train:
           name: "blip_caption"
+#     build_info:
+#         images:
+#             storage: '/export/share/datasets/vision/coco/images/'          
 
 run:
   task: image_text_pretrain
@@ -31,11 +34,11 @@ run:
   warmup_lr: 1e-6
 
   weight_decay: 0.05
-  max_epoch: 10
-  batch_size_train: 64
-  batch_size_eval: 64
+  max_epoch: 1
+  batch_size_train: 160
+  batch_size_eval: 160
   num_workers: 4
-  warmup_steps: 2000
+  warmup_steps: 1000
 
   seed: 42
   output_dir: "output/BLIP2/Pretrain_stage2"

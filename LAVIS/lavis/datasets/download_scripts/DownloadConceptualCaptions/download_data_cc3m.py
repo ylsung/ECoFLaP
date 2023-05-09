@@ -90,6 +90,7 @@ def _file_name(row):
         )
         + ".jpg"
     )
+
     return name
 
 

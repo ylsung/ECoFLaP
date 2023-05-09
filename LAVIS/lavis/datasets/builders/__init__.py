@@ -18,6 +18,14 @@ from lavis.datasets.builders.image_text_pair_builder import (
     VGCaptionBuilder,
     SBUCaptionBuilder,
 )
+
+from lavis.datasets.builders.prefix_language_pretraining_builder import (
+    PrefixConceptualCaption12MBuilder,
+    PrefixConceptualCaption3MBuilder,
+    PrefixVGCaptionBuilder,
+    PrefixSBUCaptionBuilder,
+)
+
 from lavis.datasets.builders.classification_builder import (
     NLVRBuilder,
     SNLIVisualEntailmentBuilder,
@@ -42,6 +50,10 @@ from lavis.datasets.builders.dialogue_builder import AVSDDialBuilder
 from lavis.common.registry import registry
 
 __all__ = [
+    "PrefixConceptualCaption12MBuilder",
+    "PrefixConceptualCaption3MBuilder",
+    "PrefixVGCaptionBuilder",
+    "PrefixSBUCaptionBuilder",
     "COCOCapBuilder",
     "COCORetrievalBuilder",
     "COCOVQABuilder",

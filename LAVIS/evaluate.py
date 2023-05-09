@@ -173,6 +173,14 @@ def parse_args():
         "--save_pruned_indices", action="store_true"
     )
 
+    parser.add_argument(
+        "--vit_pruned_indices", type=str, default=None
+    )
+
+    parser.add_argument(
+        "--t5_pruned_indices", type=str, default=None
+    )
+
     args = parser.parse_args()
     # if 'LOCAL_RANK' not in os.environ:
     #     os.environ['LOCAL_RANK'] = str(args.local_rank)
@@ -270,10 +278,20 @@ def main():
     orig_total_size = sum(
         param.numel() for param in model.parameters()
     )
-    
-    model.visual_encoder, vit_prune_indices = vit_modify_with_weight_init(model.visual_encoder, args, model.freeze_vit, model.vit_precision, vit_derivative_info)
 
-    model.t5_model, t5_prune_indices = t5_modify_with_weight_init(model.t5_model, args, t5_derivative_info)
+    vit_pruned_indices = None
+    if args.vit_pruned_indices is not None:
+        vit_pruned_indices = torch.load(args.vit_pruned_indices)
+        vit_pruned_indices = vit_pruned_indices["vit"]
+    
+    model.visual_encoder, vit_prune_indices = vit_modify_with_weight_init(model.visual_encoder, args, model.freeze_vit, model.vit_precision, vit_derivative_info, pruned_indices=vit_pruned_indices)
+
+    t5_pruned_indices = None
+    if args.t5_pruned_indices is not None:
+        t5_pruned_indices = torch.load(args.t5_pruned_indices)
+        t5_pruned_indices = t5_pruned_indices["t5"]
+
+    model.t5_model, t5_prune_indices = t5_modify_with_weight_init(model.t5_model, args, t5_derivative_info, pruned_indices=t5_pruned_indices)
 
     for name, param in model.t5_model.named_parameters():
         param.requires_grad = False

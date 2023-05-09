@@ -62,6 +62,7 @@ class Config:
         assert model_cls is not None, f"Model '{model.arch}' has not been registered."
 
         model_type = kwargs.get("model.model_type", None)
+
         if not model_type:
             model_type = model.get("model_type", None)
         # else use the model type selected by user.
@@ -77,6 +78,21 @@ class Config:
             OmegaConf.load(model_config_path),
             {"model": config["model"]},
         )
+
+        pretrained = kwargs.get("pretrained", None)
+
+        if pretrained is not None:
+            # model:
+            # arch: blip2_t5
+            # model_type: pretrain_flant5xl
+            # load_pretrained: True
+            # # intialize stage 2 pretraining from stage 1 pretrained model
+            # pretrained: "https://storage.googleapis.com/sfr-vision-language-research/LAVIS/models/BLIP2/blip2_pretrained.pth"
+            # freeze_vit: True
+            model_config = OmegaConf.merge(
+                model_config,
+                {"model": {"pretrained": kwargs["pretrained"]}},
+            )
 
         return model_config
 
