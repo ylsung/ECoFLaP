@@ -150,8 +150,8 @@ class VQATask(BaseTask):
 
             # print accuracies
 
-            metrics["orig_size"] = f"{self.orig_total_size / 10 ** 9:.3f}B"
-            metrics["dist_size"] = f"{self.distilled_total_size / 10 ** 9:.3f}B"
+            metrics["orig_size"] = f"{self.orig_total_size / 10 ** 9:.3f} B"
+            metrics["dist_size"] = f"{self.distilled_total_size / 10 ** 9:.3f} B"
 
             overall_acc = vqa_scorer.accuracy["overall"]
             metrics["agg_metrics"] = overall_acc

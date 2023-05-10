@@ -122,9 +122,15 @@ def main(args):
 
     model, _ = t5_modify_with_weight_init(model, args, None, pruned_indices=pruned_indices)
 
-    distilled_total_size = sum(
-        param.numel() for param in model.parameters()
-    )
+
+    if "unstrct" in args.distillation_init:
+        distilled_total_size = sum(
+            (param != 0).sum() for param in model.parameters()
+        )
+    else:
+        distilled_total_size = sum(
+            param.numel() for param in model.parameters()
+        )
 
     device_map = {
         gpu: list(

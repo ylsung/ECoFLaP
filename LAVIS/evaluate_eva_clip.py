@@ -312,9 +312,9 @@ def main():
                 layer_ids=['39'],
             )
 
-    # orig_total_size = sum(
-    #     param.numel() for param in model.parameters()
-    # )
+    orig_total_size = sum(
+        param.numel() for param in model.visual.parameters()
+    )
 
     model.visual, vit_prune_indices = vit_modify_with_weight_init(model.visual, args, False, "fp32", None, pruned_indices=pruned_indices, distilled_modify_func=distilled_modify_func)
 
@@ -328,9 +328,14 @@ def main():
     #     t5_prune_indices["P_res"] if t5_prune_indices is not None else None
     # )
 
-    # distilled_total_size = sum(
-    #     param.numel() for param in model.parameters()
-    # )
+    if is_strct_pruning:
+        distilled_total_size = sum(
+            (param != 0).sum() for param in model.visual.parameters()
+        )
+    else:
+        distilled_total_size = sum(
+            param.numel() for param in model.visual.parameters()
+        )
 
     # for name, param in model.t5_model.named_parameters():
     #     param.requires_grad = False
@@ -339,8 +344,8 @@ def main():
         cfg=cfg, job_id=job_id, task=task, model=model, datasets=datasets
     )
 
-    # runner.orig_total_size = orig_total_size
-    # runner.distilled_total_size = distilled_total_size
+    runner.orig_total_size = orig_total_size
+    runner.distilled_total_size = distilled_total_size
 
     runner.evaluate(skip_reload=True)
 
