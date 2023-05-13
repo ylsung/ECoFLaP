@@ -27,18 +27,20 @@ def get_vit_ps(num_layers, num_heads, has_norm, has_fc_norm, has_head):
         "patch_embed.proj.bias": ("P_vit_res",),
         **{f"blocks.{j}.norm1.weight": ("P_vit_res",) for j in range(num_layers)},
         **{f"blocks.{j}.norm1.bias": ("P_vit_res",) for j in range(num_layers)},
-        # **{f"blocks.{j}.attn.q.weight.{i}": (f"P_vit_self_qk_{j}_{i}", "P_vit_res") for i in range(num_heads) for j in range(num_layers)},
-        # **{f"blocks.{j}.attn.k.weight.{i}": (f"P_vit_self_qk_{j}_{i}", "P_vit_res") for i in range(num_heads) for j in range(num_layers)},
-        # **{f"blocks.{j}.attn.q_bias.{i}": (f"P_vit_self_qk_{j}_{i}",) for i in range(num_heads) for j in range(num_layers)},
-        # **{f"blocks.{j}.attn.v.weight.{i}": (f"P_vit_self_vo_{j}_{i}", "P_vit_res") for i in range(num_heads) for j in range(num_layers)},
-        # **{f"blocks.{j}.attn.v_bias.{i}": (f"P_vit_self_vo_{j}_{i}",) for i in range(num_heads) for j in range(num_layers)},
-        # **{f"blocks.{j}.attn.proj.weight.{i}": ("P_vit_res", f"P_vit_self_vo_{j}_{i}") for i in range(num_heads) for j in range(num_layers)},
-        # **{f"blocks.{j}.attn.proj.bias.{i}": ("P_vit_res",) for i in range(num_heads) for j in range(num_layers)},
-        **{f"blocks.{j}.attn.qkv.weight": (None, "P_vit_res") for j in range(num_layers)},
-        **{f"blocks.{j}.attn.q_bias": (None,) for j in range(num_layers)},
-        **{f"blocks.{j}.attn.v_bias": (None,) for j in range(num_layers)},
-        **{f"blocks.{j}.attn.proj.weight": ("P_vit_res", None) for j in range(num_layers)},
+
+        **{f"blocks.{j}.attn.qkv.weight.q.{i}": (f"P_vit_self_qk_{j}_{i}", "P_vit_res") for i in range(num_heads) for j in range(num_layers)},
+        **{f"blocks.{j}.attn.qkv.weight.k.{i}": (f"P_vit_self_qk_{j}_{i}", "P_vit_res") for i in range(num_heads) for j in range(num_layers)},
+        **{f"blocks.{j}.attn.qkv.weight.v.{i}": (f"P_vit_self_vo_{j}_{i}", "P_vit_res") for i in range(num_heads) for j in range(num_layers)},
+        **{f"blocks.{j}.attn.q_bias.{i}": (f"P_vit_self_qk_{j}_{i}",) for i in range(num_heads) for j in range(num_layers)},
+        **{f"blocks.{j}.attn.v_bias.{i}": (f"P_vit_self_vo_{j}_{i}",) for i in range(num_heads) for j in range(num_layers)},
+        **{f"blocks.{j}.attn.proj.weight.{i}": ("P_vit_res", f"P_vit_self_vo_{j}_{i}") for i in range(num_heads) for j in range(num_layers)},
         **{f"blocks.{j}.attn.proj.bias": ("P_vit_res",) for j in range(num_layers)},
+
+        # **{f"blocks.{j}.attn.qkv.weight": (None, "P_vit_res") for j in range(num_layers)},
+        # **{f"blocks.{j}.attn.q_bias": (None,) for j in range(num_layers)},
+        # **{f"blocks.{j}.attn.v_bias": (None,) for j in range(num_layers)},
+        # **{f"blocks.{j}.attn.proj.weight": ("P_vit_res", None) for j in range(num_layers)},
+        # **{f"blocks.{j}.attn.proj.bias": ("P_vit_res",) for j in range(num_layers)},
 
         **{f"blocks.{j}.norm2.weight": ("P_vit_res",) for j in range(num_layers)},
         **{f"blocks.{j}.norm2.bias": ("P_vit_res",) for j in range(num_layers)},
@@ -63,6 +65,98 @@ def get_vit_ps(num_layers, num_heads, has_norm, has_fc_norm, has_head):
     # print(ps_dict)
 
     return ps_dict
+
+
+def merge_weights_for_qkv(state_dict, num_layers):
+    layers_with_heads = [
+        "blocks.{}.attn.qkv.weight",
+    ]
+
+    name_list = ["q", "k", "v"]
+    for i in range(num_layers):
+        for layer_with_heads in layers_with_heads:
+            weights = []
+            new_layer_with_heads = layer_with_heads.format(i)
+            for head_idx in name_list:
+                layer_with_heads_this_head = new_layer_with_heads + f".{head_idx}"
+                weights.append(state_dict[layer_with_heads_this_head])
+
+            state_dict[new_layer_with_heads] = torch.cat(weights, dim=0)
+
+            for head_idx in name_list:
+                layer_with_heads_this_head = new_layer_with_heads + f".{head_idx}"
+
+                del state_dict[layer_with_heads_this_head]
+
+    return state_dict
+
+
+def split_weights_for_qkv(state_dict):
+    state_dict_with_split_qkv = {}
+    name_list = ["q", "k", "v"]
+    for k, v in state_dict.items():
+        if "attn.qkv.weight" in k:
+            weight_chunks = torch.chunk(v, 3, dim=0)
+
+            for chunk_id in range(len(weight_chunks)):
+                chunk_k = k + f".{name_list[chunk_id]}"
+                state_dict_with_split_qkv[chunk_k] = weight_chunks[chunk_id]
+        else:
+            state_dict_with_split_qkv[k] = v
+
+    return state_dict_with_split_qkv
+
+
+def merge_weights_for_heads(state_dict, num_layers, num_heads):
+    layers_with_heads = [
+        "blocks.{}.attn.qkv.weight.q",
+        "blocks.{}.attn.qkv.weight.k",
+        "blocks.{}.attn.qkv.weight.v",
+        "blocks.{}.attn.q_bias",
+        "blocks.{}.attn.v_bias",
+        "blocks.{}.attn.proj.weight",
+    ]
+    for i in range(num_layers):
+        for layer_with_heads in layers_with_heads:
+            weights = []
+            new_layer_with_heads = layer_with_heads.format(i)
+            for head_idx in range(num_heads):
+                layer_with_heads_this_head = new_layer_with_heads + f".{head_idx}"
+                weights.append(state_dict[layer_with_heads_this_head])
+
+            if new_layer_with_heads.endswith("proj.weight"):
+                state_dict[new_layer_with_heads] = torch.cat(weights, dim=1)
+            else:
+                state_dict[new_layer_with_heads] = torch.cat(weights, dim=0)
+
+            for head_idx in range(num_heads):
+                layer_with_heads_this_head = new_layer_with_heads + f".{head_idx}"
+
+                del state_dict[layer_with_heads_this_head]
+
+    return state_dict
+
+
+def split_weights_for_heads(state_dict, num_heads):
+    state_dict_with_split_heads = {}
+    for k, v in state_dict.items():
+        if "attn.qkv.weight" in k or "q_bias" in k or "v_bias" in k:
+            weight_chunks = torch.chunk(v, num_heads, dim=0)
+
+            for chunk_id in range(len(weight_chunks)):
+                chunk_k = k + f".{chunk_id}"
+                state_dict_with_split_heads[chunk_k] = weight_chunks[chunk_id]
+
+        elif "attn.proj.weight" in k:
+            weight_chunks = torch.chunk(v, num_heads, dim=1)
+
+            for chunk_id in range(len(weight_chunks)):
+                chunk_k = k + f".{chunk_id}"
+                state_dict_with_split_heads[chunk_k] = weight_chunks[chunk_id]
+        else:
+            state_dict_with_split_heads[k] = v
+
+    return state_dict_with_split_heads
 
 
 def vit_pruning(vit, distilled_vit, importance_measure, res_keep_ratio, attn_keep_ratio, ffn_keep_ratio, is_global=False, pruned_indices=None):
@@ -93,9 +187,15 @@ def vit_pruning(vit, distilled_vit, importance_measure, res_keep_ratio, attn_kee
     # split weights for num_heads
     ignore_layers = []
 
+    state_dict = split_weights_for_qkv(state_dict)
+    state_dict = split_weights_for_heads(state_dict, num_heads)
+
     if pruned_indices is not None:
         perm = pruned_indices
     else:
+        importance_measure = split_weights_for_qkv(importance_measure)
+        importance_measure = split_weights_for_heads(importance_measure, num_heads)
+
         if is_global:
             perm = global_structural_pruning(ps, importance_measure, keep_ratio_dict, max_iter=100, silent=True)
         else:
@@ -109,6 +209,9 @@ def vit_pruning(vit, distilled_vit, importance_measure, res_keep_ratio, attn_kee
     pruned_state_dict = apply_permutation(ps, perm, state_dict)
 
     pruned_state_dict.update(ignore_layers_weights)
+
+    pruned_state_dict = merge_weights_for_heads(pruned_state_dict, num_layers, num_heads)
+    pruned_state_dict = merge_weights_for_qkv(pruned_state_dict, num_layers)
 
     if is_global:
         distilled_vit = vit_modify_global_pruning(distilled_vit, pruned_state_dict)
@@ -440,8 +543,8 @@ if __name__ == "__main__":
 
 
     class Config:
-        vit_side_pretrained_weight = "39-1.0-1.0-0.5"
-        distillation_init = "unstrct_mag_prune"
+        vit_side_pretrained_weight = "39-1.0-0.5-0.5"
+        distillation_init = "mag_prune"
         distill_merge_ratio = 0.5
         exact = True
         normalization = False

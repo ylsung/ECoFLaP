@@ -56,6 +56,9 @@ class MultimodalClassificationTask(BaseTask):
             remove_duplicate=self.inst_id_key,
         )
 
+        self.orig_total_size = kwargs["orig_total_size"]
+        self.distilled_total_size = kwargs["distilled_total_size"]
+
         metrics = self._report_metrics(
             eval_result_file=eval_result_file, split_name=split_name
         )
@@ -71,6 +74,9 @@ class MultimodalClassificationTask(BaseTask):
 
         accuracy = (targets == predictions).sum() / targets.shape[0]
         metrics = {"agg_metrics": accuracy, "acc": accuracy}
+
+        metrics["orig_size"] = f"{self.orig_total_size / 10 ** 9:.3f} B"
+        metrics["dist_size"] = f"{self.distilled_total_size / 10 ** 9:.3f} B"
 
         log_stats = {split_name: {k: v for k, v in metrics.items()}}
 
