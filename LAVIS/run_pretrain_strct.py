@@ -24,7 +24,7 @@ method = "obs_prune"
 #     subprocess.call(program, shell=True)
 
 
-for ratio in [0.5]:
+# for ratio in [0.5]:
 
     # ratios=f"1.0-1.0-{ratio}"
     # vit_pruned_indices=f"vit-{method}_{ratios}"
@@ -39,29 +39,127 @@ for ratio in [0.5]:
     # print(program)
     # subprocess.call(program, shell=True)
 
-    ratios=f"1.0-1.0-{ratio}"
+    # ratios=f"1.0-1.0-{ratio}"
+    # vit_pruned_indices=f"vit-{method}_{ratios}"
+    # t5_pruned_indices=f"t5-{method}_{ratios}"
+
+    # job_id = f"pretrain2-vit+t5-{method}_{ratios}_merge1"
+    # pretrained = f"lavis/output/BLIP2/Pretrain_stage1/pretrain1-{vit_pruned_indices}/checkpoint_merge.pth"
+    # # pretrained = "/home/yilin/.cache/torch/hub/checkpoints/blip2_pretrained_flant5xl.pth"
+
+    # program = (f"CUDA_VISIBLE_DEVICES={GPU} python -m torch.distributed.run --nproc_per_node=1 --master_port {port} train.py"
+    # f" --cfg-path lavis/projects/blip2/train/pretrain_stage2_cc3m.yaml"
+    # f" --distillation_init '{method}' --vit_pruned_indices 'pruned_indices/{vit_pruned_indices}.pth'"
+    # f" --t5_pruned_indices 'pruned_indices/{t5_pruned_indices}.pth'"
+    # f" --vit_side_pretrained_weight 39-{ratios} --side_pretrained_weight 24-{ratios} --job_id '{job_id}'"
+    # f" --options pretrained={pretrained}")
+
+    # print(program)
+    # subprocess.call(program, shell=True)
+
+
+    # ratios = f"1.0-1.0-{ratio}"
+
+    # job_id = f"vit+t5-{method}_{ratios}_merge1"
+    # pretrained = f"lavis/output/BLIP2/Pretrain_stage2/pretrain2-{job_id}/checkpoint_0.pth"
+
+    # program = (f"CUDA_VISIBLE_DEVICES={GPU} python -m torch.distributed.run --nproc_per_node=1 --master_port {port} evaluate.py"
+    # f" --cfg-path lavis/projects/blip2/eval/vqav2_zeroshot_flant5xl_eval.yaml"
+    # f" --distillation_init '{method}' --vit_pruned_indices 'pruned_indices/{vit_pruned_indices}.pth'"
+    # f" --t5_pruned_indices 'pruned_indices/{t5_pruned_indices}.pth'"
+    # f" --vit_side_pretrained_weight 39-{ratios} --side_pretrained_weight 24-{ratios} --job_id '{job_id}'"
+    # f" --options pretrained={pretrained}")
+
+    # print(program)
+    # subprocess.call(program, shell=True)
+
+
+    # ratios=f"1.0-1.0-{ratio}"
+    # vit_pruned_indices=f"vit-{method}_{ratios}"
+    # t5_pruned_indices=f"t5-{method}_{ratios}"
+
+    # job_id = f"pretrain2_only-t5-{method}_{ratios}"
+    # # pretrained = f"lavis/output/BLIP2/Pretrain_stage1/pretrain1-{vit_pruned_indices}/checkpoint_0.pth"
+    # pretrained = "/home/yilin/.cache/torch/hub/checkpoints/blip2_pretrained_flant5xl.pth"
+
+    # program = (f"CUDA_VISIBLE_DEVICES={GPU} python -m torch.distributed.run --nproc_per_node=1 --master_port {port} train.py"
+    # f" --cfg-path lavis/projects/blip2/train/pretrain_stage2_cc3m.yaml"
+    # f" --distillation_init '{method}'"
+    # f" --t5_pruned_indices 'pruned_indices/{t5_pruned_indices}.pth'"
+    # f" --side_pretrained_weight 24-{ratios} --job_id '{job_id}'"
+    # f" --options pretrained={pretrained}")
+
+    # print(program)
+    # subprocess.call(program, shell=True)
+
+
+    # ratios = f"1.0-1.0-{ratio}"
+
+    # job_id = f"t5-{method}_{ratios}"
+    # pretrained = f"lavis/output/BLIP2/Pretrain_stage2/pretrain2_only-{job_id}/checkpoint_0.pth"
+
+    # program = (f"CUDA_VISIBLE_DEVICES={GPU} python -m torch.distributed.run --nproc_per_node=1 --master_port {port} evaluate.py"
+    # f" --cfg-path lavis/projects/blip2/eval/vqav2_zeroshot_flant5xl_eval.yaml"
+    # f" --distillation_init '{method}'"
+    # f" --t5_pruned_indices 'pruned_indices/{t5_pruned_indices}.pth'"
+    # f" --side_pretrained_weight 24-{ratios} --job_id '{job_id}'"
+    # f" --options pretrained={pretrained}")
+
+    # print(program)
+    # subprocess.call(program, shell=True)
+
+
+for ratio in [0.5]:
+    ratios = f"1.0-1.0-{ratio}"
+
     vit_pruned_indices=f"vit-{method}_{ratios}"
     t5_pruned_indices=f"t5-{method}_{ratios}"
 
-    job_id = f"pretrain2_only-vit+t5-{method}_{ratios}"
-    # pretrained = f"lavis/output/BLIP2/Pretrain_stage1/pretrain1-{vit_pruned_indices}/checkpoint_0.pth"
-    pretrained = "/home/yilin/.cache/torch/hub/checkpoints/blip2_pretrained_flant5xl.pth"
+    job_id = f"vit+t5-{method}_{ratios}_merge1"
+    pretrained = f"lavis/output/BLIP2/Pretrain_stage2/pretrain2-{job_id}/checkpoint_merge.pth"
 
-    program = (f"CUDA_VISIBLE_DEVICES={GPU} python -m torch.distributed.run --nproc_per_node=1 --master_port {port} train.py"
-    f" --cfg-path lavis/projects/blip2/train/pretrain_stage2_cc3m.yaml"
+    program = (f"CUDA_VISIBLE_DEVICES={GPU} python -m torch.distributed.run --nproc_per_node=1 --master_port {port} evaluate.py"
+    f" --cfg-path lavis/projects/blip2/eval/vqav2_zeroshot_flant5xl_eval.yaml"
     f" --distillation_init '{method}' --vit_pruned_indices 'pruned_indices/{vit_pruned_indices}.pth'"
     f" --t5_pruned_indices 'pruned_indices/{t5_pruned_indices}.pth'"
-    f" --vit_side_pretrained_weight 39-{ratios} --side_pretrained_weight 24-{ratios} --job_id '{job_id}'"
+    f" --vit_side_pretrained_weight 39-{ratios} --side_pretrained_weight 24-{ratios} --job_id '{job_id}'+2"
+    f" --options pretrained={pretrained}")
+
+    ratios = f"1.0-1.0-{ratio}"
+
+    job_id = f"vit+t5-{method}_{ratios}"
+    pretrained = f"lavis/output/BLIP2/Pretrain_stage2/pretrain2_only-{job_id}/checkpoint_merge.pth"
+
+    program = (f"CUDA_VISIBLE_DEVICES={GPU} python -m torch.distributed.run --nproc_per_node=1 --master_port {port} evaluate.py"
+    f" --cfg-path lavis/projects/blip2/eval/vqav2_zeroshot_flant5xl_eval.yaml"
+    f" --distillation_init '{method}' --vit_pruned_indices 'pruned_indices/{vit_pruned_indices}.pth'"
+    f" --t5_pruned_indices 'pruned_indices/{t5_pruned_indices}.pth'"
+    f" --vit_side_pretrained_weight 39-{ratios} --side_pretrained_weight 24-{ratios} --job_id '{job_id}'_merge2"
     f" --options pretrained={pretrained}")
 
     print(program)
     subprocess.call(program, shell=True)
 
+    ratios = f"1.0-1.0-{ratio}"
+
+    job_id = f"t5-{method}_{ratios}"
+    pretrained = f"lavis/output/BLIP2/Pretrain_stage2/pretrain2_only-{job_id}/checkpoint_merge.pth"
+
+    program = (f"CUDA_VISIBLE_DEVICES={GPU} python -m torch.distributed.run --nproc_per_node=1 --master_port {port} evaluate.py"
+    f" --cfg-path lavis/projects/blip2/eval/vqav2_zeroshot_flant5xl_eval.yaml"
+    f" --distillation_init '{method}'"
+    f" --t5_pruned_indices 'pruned_indices/{t5_pruned_indices}.pth'"
+    f" --side_pretrained_weight 24-{ratios} --job_id '{job_id}'_merge2"
+    f" --options pretrained={pretrained}")
+
+
+    print(program)
+    subprocess.call(program, shell=True)
 
     ratios = f"1.0-1.0-{ratio}"
 
-    job_id = f"vit+t5-{method}_{ratios}"
-    pretrained = f"lavis/output/BLIP2/Pretrain_stage2/pretrain2_only-{job_id}/checkpoint_0.pth"
+    job_id = f"vit+t5-{method}_{ratios}_baseline"
+    pretrained = "/home/yilin/.cache/torch/hub/checkpoints/blip2_pretrained_flant5xl.pth"
 
     program = (f"CUDA_VISIBLE_DEVICES={GPU} python -m torch.distributed.run --nproc_per_node=1 --master_port {port} evaluate.py"
     f" --cfg-path lavis/projects/blip2/eval/vqav2_zeroshot_flant5xl_eval.yaml"
@@ -69,6 +167,3 @@ for ratio in [0.5]:
     f" --t5_pruned_indices 'pruned_indices/{t5_pruned_indices}.pth'"
     f" --vit_side_pretrained_weight 39-{ratios} --side_pretrained_weight 24-{ratios} --job_id '{job_id}'"
     f" --options pretrained={pretrained}")
-
-    print(program)
-    subprocess.call(program, shell=True)
