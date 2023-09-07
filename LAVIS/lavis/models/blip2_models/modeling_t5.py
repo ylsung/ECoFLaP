@@ -1727,6 +1727,18 @@ class T5ForConditionalGeneration(T5PreTrainedModel):
     def get_decoder(self):
         return self.decoder
 
+    def direct_forward_classifier_loss(self, x, reduction: Optional[str] = "mean"):
+        lm_logits = self.lm_head(x)
+
+        labels = torch.argmax(lm_logits, -1)
+
+        loss_fct = CrossEntropyLoss(ignore_index=-100, reduction=reduction)
+        loss = loss_fct(lm_logits.view(-1, lm_logits.size(-1)), labels.view(-1))
+        if reduction == "none":
+            loss = loss.view(lm_logits.size(0), -1).sum(1)
+
+        return loss
+
     @add_start_docstrings_to_model_forward(T5_INPUTS_DOCSTRING)
     @replace_return_docstrings(
         output_type=Seq2SeqLMOutput, config_class=_CONFIG_FOR_DOC

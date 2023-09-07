@@ -1,0 +1,44 @@
+ # Copyright (c) 2022, salesforce.com, inc.
+ # All rights reserved.
+ # SPDX-License-Identifier: BSD-3-Clause
+ # For full license text, see the LICENSE file in the repo root or https://opensource.org/licenses/BSD-3-Clause
+
+model:
+  arch: t5
+  model_type: flant5xl
+  use_grad_checkpoint: False
+
+datasets:
+  c4:
+    text_processor:
+        eval:
+          name: "blip_caption"
+
+run:
+  task: language_modeling
+  # optimizer
+  lr_sched: "linear_warmup_cosine_lr"
+  init_lr: 1e-4
+  min_lr: 1e-5
+  warmup_lr: 1e-6
+
+  weight_decay: 0.05
+  max_epoch: 1
+  batch_size_train: 40
+  batch_size_eval: 40
+  num_workers: 4
+  warmup_steps: 1000
+
+  seed: 42
+  output_dir: "output/BLIP2/c4"
+
+  amp: True
+  resume_ckpt_path: null
+
+  evaluate: False
+  test_splits: ["validation"]
+
+  device: "cuda"
+  world_size: 1
+  dist_url: "env://"
+  distributed: True

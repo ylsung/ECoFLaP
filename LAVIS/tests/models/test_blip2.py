@@ -164,6 +164,174 @@ class TestBlip2:
         captions = model.generate({"image": image}, num_captions=3)
 
         assert len(captions) == 3
+        
+    def test_blip2_flant5xl_func_pruning(self):
+        from lavis.compression.modify_model_with_weight_init import t5_modify_with_weight_init
+
+        class Config:
+            side_pretrained_weight = "3-2048"
+            distillation_init = "sum"
+            distilled_block_ids = "[[0,1,2],[3,4],5]"
+            distilled_block_weights = None
+            modules_to_merge = ".*|.*"
+            permute_before_merge = False
+            permute_on_block_before_merge = True
+
+        config = Config()
+        # loads BLIP2-FLAN-T5XL caption model,
+        model, vis_processors, _ = load_model_and_preprocess(
+            name="blip2_t5", model_type="pretrain_flant5xl", is_eval=True, device=device
+        )
+
+        model.t5_model = t5_modify_with_weight_init(model.t5_model, config)
+
+        for name, param in model.t5_model.named_parameters():
+            param.requires_grad = False
+
+        # preprocess the image
+        # vis_processors stores image transforms for "train" and "eval" (validation / testing / inference)
+        image = vis_processors["eval"](raw_image).unsqueeze(0).to(device)
+
+        # generate caption
+        caption = model.generate({"image": image})
+
+        print(caption)
+
+        # generate multiple captions
+        captions = model.generate({"image": image}, num_captions=3)
+
+        assert len(captions) == 3
+    
+    def test_blip2_flant5xl_strct_mag_pruner(self):
+        from lavis.compression import load_pruner
+        
+        config = {
+            "task_type": "cc3m",
+            "prune_models": "t5+vit",
+            "t5_prune_spec": "24-1.0-0.5-0.5",
+            "vit_prune_spec": "39-1.0-0.5-0.5",
+            "importance_scores_cache": None,
+            "keep_indices_cache": None,
+            "is_strct_pruning": False,
+            "is_global": False,
+        }
+
+        # loads BLIP2-FLAN-T5XL caption model,
+        model, vis_processors, _ = load_model_and_preprocess(
+            name="blip2_t5", model_type="pretrain_flant5xl", is_eval=True, device=device
+        )
+        
+        class DSet(torch.utils.data.Dataset):
+            def __init__(self):
+                super().__init__()
+                
+                self.data = [
+                    {"image": vis_processors["eval"](raw_image).unsqueeze(0).to(device),
+                    "text_input": "abcddd",
+                    "text_output": "123456"
+                    },
+                ]
+                
+            def __len__(self):
+                return len(self.data)
+            
+            def __getitem__(self, idx):
+                return self.data[idx]
+                
+        dset = DSet()
+        
+        dloader = torch.utils.data.DataLoader(dset, batch_size=1)
+        pruner = load_pruner("strct_mag_pruner", model, dloader, cfg=config)
+        
+        total_size = sum(
+            param.numel() for param in model.parameters()
+        )
+        
+        model, _ = pruner.prune()
+        
+        image = vis_processors["eval"](raw_image).unsqueeze(0).to(device)
+
+        # generate caption
+        caption = model.generate({"image": image})
+
+        print(caption)
+
+        # generate multiple captions
+        captions = model.generate({"image": image}, num_captions=3)
+
+        assert len(captions) == 3
+        
+        distilled_total_size = sum(
+            param.numel() for param in model.parameters()
+        )
+
+        print(distilled_total_size / total_size * 100.0)
+    
+    def test_blip2_flant5xl_unstrct_mag_pruner(self):
+        from lavis.compression import load_pruner
+        
+        config = {
+            "task_type": "cc3m",
+            "prune_models": "t5+vit",
+            "t5_prune_spec": "24-0.5-1.0-1.0",
+            "vit_prune_spec": "39-0.5-1.0-1.0",
+            "importance_scores_cache": None,
+            "keep_indices_cache": None,
+            "is_strct_pruning": False,
+            "is_global": False,
+        }
+
+        # loads BLIP2-FLAN-T5XL caption model,
+        model, vis_processors, _ = load_model_and_preprocess(
+            name="blip2_t5", model_type="pretrain_flant5xl", is_eval=True, device=device
+        )
+        
+        class DSet(torch.utils.data.Dataset):
+            def __init__(self):
+                super().__init__()
+                
+                self.data = [
+                    {"image": vis_processors["eval"](raw_image).unsqueeze(0).to(device),
+                    "text_input": "abcddd",
+                    "text_output": "123456"
+                    },
+                ]
+                
+            def __len__(self):
+                return len(self.data)
+            
+            def __getitem__(self, idx):
+                return self.data[idx]
+                
+        dset = DSet()
+        
+        dloader = torch.utils.data.DataLoader(dset, batch_size=1)
+        pruner = load_pruner("unstrct_mag_pruner", model, dloader, cfg=config)
+        
+        total_size = sum(
+            param.numel() for param in model.parameters()
+        )
+        
+        model, _ = pruner.prune()
+        
+        image = vis_processors["eval"](raw_image).unsqueeze(0).to(device)
+
+        # generate caption
+        caption = model.generate({"image": image})
+
+        print(caption)
+
+        # generate multiple captions
+        captions = model.generate({"image": image}, num_captions=3)
+
+        assert len(captions) == 3
+        
+        distilled_total_size = sum(
+            (param != 0).float().sum() for param in model.parameters()
+        )
+
+        print(distilled_total_size / total_size * 100.0)
+
 
     def test_blip2_flant5xxl(self):
         # loads BLIP2-FLAN-T5XXL caption model,

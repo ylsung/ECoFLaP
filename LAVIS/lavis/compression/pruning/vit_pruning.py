@@ -11,8 +11,7 @@ from collections import defaultdict
 from typing import NamedTuple
 
 from lavis.compression.weight_matching import permutation_spec_from_axes_to_perm, get_permuted_param, apply_permutation, ot_weight_fusion, apply_permutation_by_matrix
-from lavis.compression.structural_pruning import structural_pruning, global_structural_pruning
-from lavis.compression.unstructural_pruning import unstrct_pruning
+from lavis.compression.pruning.base_pruning import structural_pruning, global_structural_pruning, unstructural_pruning
 from lavis.compression.global_pruning_model_modifier.vit_model_modifier import vit_modify_global_pruning
 from lavis.models.blip2_models.blip2 import LayerNorm, disabled_train, Blip2Base
 
@@ -159,16 +158,16 @@ def split_weights_for_heads(state_dict, num_heads):
     return state_dict_with_split_heads
 
 
-def vit_pruning(vit, distilled_vit, importance_measure, res_keep_ratio, attn_keep_ratio, ffn_keep_ratio, is_global=False, pruned_indices=None):
+def vit_strct_pruning(vit, importance_measure, keep_indices_or_masks, res_keep_ratio, attn_keep_ratio, ffn_keep_ratio, ignore_layers=[], is_global=False):
     state_dict = vit.state_dict()
 
     num_layers = vit.depth
     num_heads = vit.num_heads
 
     # for clip models, blip's vit does not have the following three
-    has_norm = getattr(distilled_vit, "norm", None)
-    has_fc_norm = getattr(distilled_vit, "fc_norm", None)
-    has_head = getattr(distilled_vit, "head", None)
+    has_norm = getattr(vit, "norm", None)
+    has_fc_norm = getattr(vit, "fc_norm", None)
+    has_head = getattr(vit, "head", None)
 
     ps_dict = get_vit_ps(num_layers, num_heads, has_norm, has_fc_norm, has_head)
     ps = permutation_spec_from_axes_to_perm(ps_dict)
@@ -185,22 +184,24 @@ def vit_pruning(vit, distilled_vit, importance_measure, res_keep_ratio, attn_kee
             raise ValueError("The pruned module is unknown.")
 
     # split weights for num_heads
-    ignore_layers = []
+    # ignore_layers = []
 
     state_dict = split_weights_for_qkv(state_dict)
     state_dict = split_weights_for_heads(state_dict, num_heads)
 
-    if pruned_indices is not None:
-        perm = pruned_indices
-    else:
-        importance_measure = split_weights_for_qkv(importance_measure)
+    importance_measure = split_weights_for_qkv(importance_measure)
+    
+    if keep_indices_or_masks is None:
         importance_measure = split_weights_for_heads(importance_measure, num_heads)
 
         if is_global:
             perm = global_structural_pruning(ps, importance_measure, keep_ratio_dict, max_iter=100, silent=True)
         else:
             perm = structural_pruning(ps, importance_measure, keep_ratio_dict, max_iter=100, silent=True)
-
+    else:
+        # use cached indices/masks
+        perm = keep_indices_or_masks
+    
     ignore_layers_weights = {}
 
     for l in ignore_layers:
@@ -213,12 +214,7 @@ def vit_pruning(vit, distilled_vit, importance_measure, res_keep_ratio, attn_kee
     pruned_state_dict = merge_weights_for_heads(pruned_state_dict, num_layers, num_heads)
     pruned_state_dict = merge_weights_for_qkv(pruned_state_dict, num_layers)
 
-    if is_global:
-        distilled_vit = vit_modify_global_pruning(distilled_vit, pruned_state_dict)
-
-    distilled_vit.load_state_dict(pruned_state_dict)
-
-    return distilled_vit, perm
+    return pruned_state_dict, perm
 
 
 def vit_fusion(vit, distilled_vit, distill_merge_ratio=0.5, exact=True, normalization=False, metric="dot", to_one=False, importance=False):
@@ -265,17 +261,16 @@ def vit_fusion(vit, distilled_vit, distill_merge_ratio=0.5, exact=True, normaliz
     return distilled_vit
 
 
-def vit_unstrct_pruning(vit, distilled_vit, importance_measure, res_keep_ratio, attn_keep_ratio, ffn_keep_ratio, is_global=False, pruned_indices=None):
+def vit_unstrct_pruning(vit, importance_measure, keep_indices_or_masks, res_keep_ratio, attn_keep_ratio, ffn_keep_ratio, ignore_layers=[], is_global=False):
 
-    if pruned_indices is not None:
-        mask = pruned_indices
-    else:
-        ignore_layers = []
+    # ignore_layers = []
 
-        for k in importance_measure.keys():
-            if any(sub_n in k for sub_n in ["cls_token", "pos_embed", "patch_embed", "norm"]):
-                ignore_layers.append(k)
+    # for k in importance_measure.keys():
+    #     # don't prune embedding layers and output layers
+    #     if any(sub_n in k for sub_n in ["cls_token", "pos_embed", "patch_embed", "norm"]):
+    #         ignore_layers.append(k)
 
+    if keep_indices_or_masks is None:
         if res_keep_ratio != 1:
             keys_to_prune = {k: 1 for k in importance_measure.keys()}
             ratio = res_keep_ratio
@@ -285,20 +280,19 @@ def vit_unstrct_pruning(vit, distilled_vit, importance_measure, res_keep_ratio, 
         elif ffn_keep_ratio:
             keys_to_prune = {k: 1 for k in importance_measure.keys() if ".mlp.fc" in k}
             ratio = ffn_keep_ratio
-
-        mask = unstrct_pruning(importance_measure, keys_to_prune, ignore_layers, ratio)
-
-        # if is_global:
-        #     distilled_vit = t5_modify_global_pruning(distilled_vit, pruned_state_dict)
+        mask = unstructural_pruning(importance_measure, keys_to_prune, ignore_layers, ratio)
+    else:
+        # use cached indices/masks
+        mask = keep_indices_or_masks
+    # if is_global:
+    #     distilled_vit = t5_modify_global_pruning(distilled_vit, pruned_state_dict)
 
     pruned_state_dict = {}
 
     for k, v in vit.state_dict().items():
         pruned_state_dict[k] = v * mask[k].type(v.dtype)
 
-    distilled_vit.load_state_dict(pruned_state_dict)
-
-    return distilled_vit, mask
+    return pruned_state_dict, mask
 
 
 

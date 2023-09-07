@@ -704,7 +704,7 @@ def weights_multiplication_from_different_layers(weights_to_distill, target_name
     return weights
 
 
-def t5_modify_with_weight_init(transformer, petl_config, derivative_info=None, sampled_loader=None, pruned_indices=None):
+def t5_modify_with_weight_init(transformer, petl_config, derivative_info=None, sampled_loader=None, to_bf16=False, pruned_indices=None, importance_measure=None, woodfisher_pruner=None):
 
     device = list(transformer.parameters())[0].device
 
@@ -845,7 +845,14 @@ def t5_modify_with_weight_init(transformer, petl_config, derivative_info=None, s
                             print(f"doesn't have {n}. Use shared.weight for it.")
                             derivative_info[n] = derivative_info["shared.weight"]
 
-                if "mag_prune" in petl_config.distillation_init:
+                if importance_measure is not None:
+                    print("Use pre-extracted importance measure.")
+                    for n, p in transformer.state_dict().items():
+                        if n not in importance_measure: # those are shared embeddings
+                            print(f"importance_measure doesn't have {n}. Use shared.weight for it.")
+                            importance_measure[n] = importance_measure["shared.weight"]
+
+                elif "mag_prune" in petl_config.distillation_init:
                     # using square of magnitude as the measure.
                     importance_measure = {k: v ** 2 for k, v in transformer.state_dict().items()}
 
@@ -862,6 +869,9 @@ def t5_modify_with_weight_init(transformer, petl_config, derivative_info=None, s
                     # all the importance is random
                     importance_measure = {k: torch.randn_like(v) for k, v in transformer.state_dict().items()}
 
+                elif "woodfisher" in petl_config.distillation_init:
+                    importance_measure = derivative_info
+                    assert is_strct_pruning == True
                 else:
                     raise ValueError("The pruning method is invalid.")
 
@@ -877,6 +887,13 @@ def t5_modify_with_weight_init(transformer, petl_config, derivative_info=None, s
                         ffn_keep_ratio,
                         is_global="global" in petl_config.distillation_init,
                     )
+
+                    if "woodfisher" in petl_config.distillation_init:
+                        pruned_weights = woodfisher_pruner.reweighting_after_pruning(
+                            transformer.state_dict(), t5_prune_indices
+                        )
+
+                        distilled_transformer.load_state_dict(pruned_weights)
                 else:
                     distilled_transformer, t5_prune_indices = pruning(
                         transformer, 
@@ -901,13 +918,20 @@ def t5_modify_with_weight_init(transformer, petl_config, derivative_info=None, s
                     importance=petl_config.importance,
                 )
 
+        if to_bf16:
+            for name, param in distilled_transformer.named_parameters():
+                param.requires_grad = False
+                param.data = param.data.bfloat16()
+
         distilled_transformer.to(device)
 
         del transformer
-        return distilled_transformer, t5_prune_indices
+        torch.cuda.empty_cache()
+
+        return distilled_transformer, t5_prune_indices, importance_measure
     
     transformer.to(device)
-    return transformer, t5_prune_indices
+    return transformer, t5_prune_indices, importance_measure
 
 
 if __name__ == "__main__":

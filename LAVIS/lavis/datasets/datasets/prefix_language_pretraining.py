@@ -47,6 +47,8 @@ class PrefixLanguagePretrainingDataset(BaseDataset, __DisplMixin):
 
         split = random.randint(1, len(caption) // 2)
 
+        # split = random.Random(0).randint(1, len(caption) // 2)
+
         prefix = caption[:split]
         output = caption[split:]
 

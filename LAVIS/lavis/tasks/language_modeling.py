@@ -12,15 +12,15 @@ from lavis.tasks.base_task import BaseTask
 from lavis.datasets.data_utils import prepare_sample
 
 
-@registry.register_task("image_text_pretrain")
-class ImageTextPretrainTask(BaseTask):
+@registry.register_task("language_modeling")
+class LanguageModelingTask(BaseTask):
     def __init__(self):
         super().__init__()
 
     def evaluation(self, model, data_loader, cuda_enabled=True):
         pass
 
-    def get_data_derivative(self, model, data_loader, num_data=128, power=2, num_logits=1, vision_weight=0.0, cuda_enabled=False):
+    def get_data_derivative(self, model, data_loader, num_data=128, power=2, num_logits=1, cuda_enabled=False, **kwargs):
         gradients_dict = {}
 
         if power == 1:
@@ -40,16 +40,11 @@ class ImageTextPretrainTask(BaseTask):
         for samples in data_loader:
             samples = prepare_sample(samples, cuda_enabled=cuda_enabled)
 
-            loss_dict = model.forward_with_vision_auxloss(samples)
-            loss = loss_dict["loss"] + loss_dict["vision_auxloss"] * vision_weight
+            loss = model(samples)["loss"]
             loss.backward()
 
             for name, param in model.named_parameters():
-
-                if param.grad is not None:
-                    gradients_dict[name] += grad_method(param.grad.cpu().data) / num_data
-                else:
-                    no_grad_list.add(name)
+                gradients_dict[name] += grad_method(param.grad).cpu().data / num_data
             
             model.zero_grad()
 

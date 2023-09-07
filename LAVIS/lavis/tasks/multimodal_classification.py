@@ -48,6 +48,20 @@ class MultimodalClassificationTask(BaseTask):
 
         return results
 
+    def get_samples_probs(self, model, samples, num_logits=1):
+        outputs = model.predict(samples)
+
+        logits = outputs["predictions"] / 100 # canceled out the multiplication by 100 in model.predict()
+        targets = outputs["targets"]
+
+        probs = torch.nn.functional.softmax(logits, -1)
+
+        batch_size = torch.arange(len(targets)).to(targets.device)
+
+        probs = probs[batch_size, targets].unsqueeze(-1)
+
+        return probs
+
     def after_evaluation(self, val_result, split_name, epoch, **kwargs):
         eval_result_file = self.save_result(
             result=val_result,

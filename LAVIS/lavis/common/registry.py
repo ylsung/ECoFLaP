@@ -12,6 +12,7 @@ class Registry:
         "task_name_mapping": {},
         "processor_name_mapping": {},
         "model_name_mapping": {},
+        "pruner_name_mapping": {},
         "lr_scheduler_name_mapping": {},
         "runner_name_mapping": {},
         "state": {},
@@ -105,6 +106,35 @@ class Registry:
                 )
             cls.mapping["model_name_mapping"][name] = model_cls
             return model_cls
+
+        return wrap
+
+    @classmethod
+    def register_pruner(cls, name):
+        r"""Register a pruner to registry with key 'name'
+
+        Args:
+            name: Key with which the task will be registered.
+
+        Usage:
+
+            from lavis.common.registry import registry
+        """
+
+        def wrap(pruner_cls):
+            from lavis.compression import BasePruner
+
+            assert issubclass(
+                pruner_cls, BasePruner
+            ), "All pruners must inherit BasePruner class"
+            if name in cls.mapping["pruner_name_mapping"]:
+                raise KeyError(
+                    "Name '{}' already registered for {}.".format(
+                        name, cls.mapping["pruner_name_mapping"][name]
+                    )
+                )
+            cls.mapping["pruner_name_mapping"][name] = pruner_cls
+            return pruner_cls
 
         return wrap
 
@@ -237,6 +267,10 @@ class Registry:
         return cls.mapping["model_name_mapping"].get(name, None)
 
     @classmethod
+    def get_pruner_class(cls, name):
+        return cls.mapping["pruner_name_mapping"].get(name, None)
+
+    @classmethod
     def get_task_class(cls, name):
         return cls.mapping["task_name_mapping"].get(name, None)
 
@@ -259,6 +293,10 @@ class Registry:
     @classmethod
     def list_models(cls):
         return sorted(cls.mapping["model_name_mapping"].keys())
+
+    @classmethod
+    def list_pruners(cls):
+        return sorted(cls.mapping["pruner_name_mapping"].keys())
 
     @classmethod
     def list_tasks(cls):

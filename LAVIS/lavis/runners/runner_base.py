@@ -427,12 +427,17 @@ class RunnerBase:
 
             return test_logs
 
-    def get_data_derivative(self, num_data=128, power=2, num_logits=1):
+    def get_data_derivative(self, num_data=128, power=2, num_logits=1, vision_weight=0.0):
         model = self.unwrap_dist_model(self.model)
         model.eval()
 
         # record the requires_grad variable, for recovering it later
         requires_grad_record = {n: p.requires_grad for n, p in model.named_parameters()}
+
+        dtype_record = {n: p.dtype for n, p in model.state_dict().items()}
+
+        for n, p in model.state_dict().items():
+            p.data = p.data.type(torch.bfloat16)
 
         # set requires_grad to be true for getting model's derivatives
         for n, p in model.named_parameters():
@@ -451,18 +456,27 @@ class RunnerBase:
         self.config.run_cfg.batch_size_train = batch_size_train_record
         self.config.run_cfg.batch_size_eval = batch_size_eval_record
 
+        self.task.before_evaluation(
+            model=model,
+            dataset=data_loader.dataset,
+        )
+
         derivative_info = self.task.get_data_derivative(
             model=model, 
             data_loader=data_loader, 
             num_data=num_data, 
             power=power,
             num_logits=num_logits,
+            vision_weight=vision_weight,
             cuda_enabled=self.cuda_enabled
         )
 
         # set to original requires grad
         for n, p in model.named_parameters():
             p.requires_grad = requires_grad_record[n]
+
+        for n, p in model.state_dict().items():
+            p.data = p.data.type(dtype_record[n])
 
         return derivative_info
 
@@ -585,6 +599,80 @@ class RunnerBase:
             h.remove()
 
         return input_representations, output_representations
+
+    def get_last_activations(self, num_data=128, power=2):
+        import transformers
+        import torch.nn.functional as F
+
+        model = self.unwrap_dist_model(self.model)
+        model.eval()
+
+        if power == 1:
+            scale_method = torch.abs
+        elif power == 2:
+            scale_method = torch.square
+        else:
+            raise ValueError(f"power in `get_data_derivative` can only be 1 or 2, but got {power}")
+
+        # doing the forward
+        batch_size_train_record = self.config.run_cfg.batch_size_train
+        batch_size_eval_record = self.config.run_cfg.batch_size_eval
+
+        batch_size = 16
+
+        self.config.run_cfg.batch_size_train = batch_size
+        self.config.run_cfg.batch_size_eval = batch_size
+
+        assert num_data % batch_size == 0, f"num_data should be dividable by {batch_size}."
+
+        split_name = self.test_splits[0]
+        data_loader = self.dataloaders.get(split_name, None)
+        assert data_loader, "data_loader for split {} is None.".format(split_name)
+
+        self.config.run_cfg.batch_size_train = batch_size_train_record
+        self.config.run_cfg.batch_size_eval = batch_size_eval_record
+
+        # get the activations by forwarding the data through the model
+        output = self.task.get_activations(
+            model=model, 
+            data_loader=data_loader, 
+            num_data=num_data,
+            cuda_enabled=self.cuda_enabled
+        )
+
+        return output
+
+    def get_dataloader_for_importance_computation(self, num_data=128, power=2):
+        import transformers
+        import torch.nn.functional as F
+
+        if power == 1:
+            scale_method = torch.abs
+        elif power == 2:
+            scale_method = torch.square
+        else:
+            raise ValueError(f"power in `get_data_derivative` can only be 1 or 2, but got {power}")
+
+        # doing the forward
+        batch_size_train_record = self.config.run_cfg.batch_size_train
+        batch_size_eval_record = self.config.run_cfg.batch_size_eval
+
+        batch_size = 1
+
+        self.config.run_cfg.batch_size_train = batch_size
+        self.config.run_cfg.batch_size_eval = batch_size
+
+        assert num_data % batch_size == 0, f"num_data should be dividable by {batch_size}."
+
+        split_name = self.test_splits[0]
+        data_loader = self.dataloaders.get(split_name, None)
+        assert data_loader, "data_loader for split {} is None.".format(split_name)
+
+        self.config.run_cfg.batch_size_train = batch_size_train_record
+        self.config.run_cfg.batch_size_eval = batch_size_eval_record
+
+        # get the activations by forwarding the data through the model
+        return data_loader
 
     def convert_activation_to_importance(self, input_representations, output_representations, use_input_activation=False):
         # Visual encoder

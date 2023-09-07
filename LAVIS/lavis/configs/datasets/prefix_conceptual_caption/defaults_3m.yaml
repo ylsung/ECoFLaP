@@ -15,6 +15,6 @@ datasets:
           url:
               - /export/home/workspace/datasets/cc3m.json
           storage:
-              - /home/yilin/ylsung/conceptual_caption/cc3m.json
+              - /work/users/y/l/ylsung/data/conceptual_caption/cc3m.json
       images:
-          storage: /home/yilin/ylsung/conceptual_caption/data
+          storage: /work/users/y/l/ylsung/data/conceptual_caption/images

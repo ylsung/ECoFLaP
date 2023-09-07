@@ -5,16 +5,16 @@
 
 model:
   arch: blip2_t5
-  model_type: pretrain_flant5xl
+  model_type: caption_coco_flant5xl
   use_grad_checkpoint: False
 
 
 datasets:
-  coco_caption: # name of the dataset builder
+  nocaps: # name of the dataset builder
     vis_processor:
         eval:
           name: "blip_image_eval"
-          image_size: 224
+          image_size: 364
     text_processor:
         eval:
           name: "blip_caption"
@@ -37,7 +37,7 @@ run:
   output_dir: "output/BLIP2/Caption_coco_flant5xl"
 
   evaluate: True
-  test_splits: ["test"]
+  test_splits: ["val"]
 
   device: "cuda"
   world_size: 1

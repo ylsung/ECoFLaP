@@ -39,7 +39,7 @@ def t5_unstrct_pruning(transformer, distilled_transformer, importance_measure, r
         ] # not used but may be used in the future
 
         for k in importance_measure.keys():
-            if "layer_norm" in k:
+            if any(sub_n in k for sub_n in ["shared", "embed_tokens", "lm_head", "layer_norm"]):
                 ignore_layers.append(k)
 
         if res_keep_ratio != 1:

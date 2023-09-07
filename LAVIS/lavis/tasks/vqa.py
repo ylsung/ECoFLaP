@@ -114,6 +114,15 @@ class VQATask(BaseTask):
 
         return pred_qa_pairs
 
+    def get_samples_probs(self, model, samples, num_logits=1):
+        logits = model.get_logits_without_labels(samples)["logits"][:, 0, :] # take the output of the first token
+
+        probs = torch.nn.functional.softmax(logits, -1)
+
+        probs = torch.gather(probs, -1, torch.argsort(probs, descending=True))[:, :num_logits] # (B, num_logits)
+
+        return probs
+
     def after_evaluation(self, val_result, split_name, **kwargs):
         result_file = self.save_result(
             val_result,

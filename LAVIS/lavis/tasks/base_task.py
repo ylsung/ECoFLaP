@@ -150,10 +150,24 @@ class BaseTask:
 
     def get_activations(self, model, data_loader, num_data=128, cuda_enabled=False):
         idx = 0
+
+        logits_list = []
+        loss_list = []
+
+        text_list = []
         for samples in data_loader:
             samples = prepare_sample(samples, cuda_enabled=cuda_enabled)
 
-            logits = model.get_logits_without_labels(samples)["logits"]
+            for t_in, t_out in zip(samples["text_input"], samples["text_output"]):
+                text_list.append(t_in + t_out)
+            
+            output = model(samples)
+            logits = output["logits"]
+            loss = output["loss"]
+
+            logits_list.append(logits.cpu().detach())
+            loss_list.append(loss.cpu().detach())
+
             idx += logits.shape[0]
 
             print(idx)
@@ -161,7 +175,26 @@ class BaseTask:
             if idx >= num_data:
                 break
 
-    def get_data_derivative(self, model, data_loader, num_data=128, power=2, num_logits=1, cuda_enabled=False):
+        def pad(inputs):
+            max_len = max([ipt.shape[1] for ipt in inputs])
+
+            padded_inputs = []
+
+            for ipt in inputs:
+                B, L, D = ipt.shape
+
+                padded_inputs.append(torch.cat([ipt, torch.zeros((B, max_len - L, D), dtype=ipt.dtype)], dim=1))
+
+            return padded_inputs
+
+        outputs = {
+            "texts": text_list,
+            "logits": torch.cat(pad(logits_list), dim=0),
+            # "losses": torch.cat(loss_list, dim=0),
+        }
+        return outputs
+
+    def get_data_derivative(self, model, data_loader, num_data=128, power=2, num_logits=1, cuda_enabled=False, **kwargs):
         metric_logger = MetricLogger(delimiter="  ")
         header = "Get data derivative"
         # TODO make it configurable
@@ -180,14 +213,14 @@ class BaseTask:
             gradients_dict[name] = 0
 
         idx = 0
+
+        no_grad_list = set()
+
         for samples in data_loader:
             samples = prepare_sample(samples, cuda_enabled=cuda_enabled)
 
-            logits = model.get_logits_without_labels(samples)["logits"][:, 0, :] # take the output of the first token
+            probs = self.get_samples_probs(model, samples, num_logits)
 
-            probs = torch.nn.functional.softmax(logits, -1)
-
-            probs = torch.gather(probs, -1, torch.argsort(probs, descending=True))[:, :num_logits] # (B, num_logits)
             log_probs = probs.log()
 
             for b in range(log_probs.shape[0]):
@@ -198,7 +231,10 @@ class BaseTask:
                     prob = probs[b, i]
 
                     for name, param in model.named_parameters():
-                        gradients_dict[name] += (prob * grad_method(param.grad)).cpu().data / num_data
+                        if param.grad is not None:
+                            gradients_dict[name] += (prob * grad_method(param.grad)).cpu().data / num_data
+                        else:
+                            no_grad_list.add(name)
 
                     model.zero_grad()
 
@@ -207,9 +243,11 @@ class BaseTask:
             if idx >= num_data:
                 break
 
+        for k in no_grad_list:
+            print(f"{k} has no grad")
+
         return gradients_dict
             
-
     def _train_inner_loop(
         self,
         epoch,
