@@ -4,6 +4,7 @@ Adapted from https://github.com/mlfoundations/open_clip
 import re
 import json
 import math
+import time
 import logging
 from dataclasses import dataclass
 from typing import Tuple, Union, Callable, Optional
@@ -415,18 +416,18 @@ class EVA_CLIP(BaseModel):
 
         return self._loss
 
-    def forward(self, image, text):
-        if image is None:
-            return self.encode_text(text)
-        elif text is None:
-            return self.encode_image(image)
-        image_features = self.encode_image(image)
-        image_features = F.normalize(image_features, dim=-1)
+    # def forward(self, image, text):
+    #     if image is None:
+    #         return self.encode_text(text)
+    #     elif text is None:
+    #         return self.encode_image(image)
+    #     image_features = self.encode_image(image)
+    #     image_features = F.normalize(image_features, dim=-1)
 
-        text_features = self.encode_text(text)
-        text_features = F.normalize(text_features, dim=-1)
+    #     text_features = self.encode_text(text)
+    #     text_features = F.normalize(text_features, dim=-1)
 
-        return image_features, text_features, self.text.logit_scale.exp()
+    #     return image_features, text_features, self.text.logit_scale.exp()
 
     def forward(self, samples):
         image = samples.get("image")

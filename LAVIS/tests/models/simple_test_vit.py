@@ -82,7 +82,7 @@ model.classifier = model.zero_shot_classifier(
 
 del model.text
 
-method = "vit_obd_pruner"
+method = "vit_wanda_pruner"
 
 dloader = torch.utils.data.DataLoader(dset, batch_size=1)
 pruner = load_pruner(method, model, dloader, cfg=config)

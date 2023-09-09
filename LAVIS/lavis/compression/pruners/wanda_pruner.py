@@ -353,7 +353,7 @@ class T5LayerWandaPruner(LayerWiseBasePruner):
 
 
 @registry.register_pruner("vit_wanda_pruner")
-class VITWandaPruner(LayerWiseBasePruner):
+class VITLayerWandaPruner(LayerWiseBasePruner):
     pruner_name = "vit_wanda_pruner"
     def __init__(
         self,
@@ -487,20 +487,20 @@ class VITWandaPruner(LayerWiseBasePruner):
             def __init__(self, module):
                 super().__init__()
                 self.module = module
-            def forward(self, inp, **kwargs):
+            def forward(self, inp, rel_pos_bias):
                 inps.append(inp)
                 inps[-1].requires_grad = False
                 
                 cache = {}
-                for k in keys_to_cache:
-                    cache[k] = kwargs[k]
+                cache["rel_pos_bias"] = rel_pos_bias
                 caches.append(cache)
                 raise ValueError
 
         layers[0] = Catcher(layers[0])
         for batch in dataloader:
             try:
-                model(batch)
+                # model(batch)
+                model.encode_image(batch["image"])
             except ValueError:
                 pass 
         layers[0] = layers[0].module
@@ -532,7 +532,7 @@ class VITWandaPruner(LayerWiseBasePruner):
 
             def add_batch(name):
                 def tmp(_, inp, out):
-                    print(inp[0].data.shape)
+                    # print(inp[0].data.shape)
                     wrapped_layers[name].add_batch(inp[0].data, out.data)
                 return tmp
 
@@ -542,6 +542,7 @@ class VITWandaPruner(LayerWiseBasePruner):
 
             for j in range(n_samples):
                 with torch.no_grad():
+                    print(inps[j].shape)
                     outs[j] = layer(inps[j], **caches[j])[0]
             for h in handles:
                 h.remove()
@@ -568,13 +569,13 @@ class VITWandaPruner(LayerWiseBasePruner):
 
             for j in range(n_samples):
                 with torch.no_grad():
-                    outs[j] = layer(inps[j], **caches[j])[0]
+                    outs[j] = layer(inps[j], **caches[j])
             inps, outs = outs, inps
 
         torch.cuda.empty_cache()
-        
+
         return model
-        
+
     @print_time
     def prune(self, importance_scores=None, keep_indices_or_masks=None):
         print("In: ", self.pruner_name)
