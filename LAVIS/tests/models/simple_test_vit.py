@@ -34,11 +34,12 @@ from lavis.compression import load_pruner
 # }
 
 config = {
-    "prune_spec": "40-0.5-1.0-1.0",
+    "prune_spec": "40-0.9-1.0-1.0",
     "importance_scores_cache": None,
     "keep_indices_cache": None,
     "is_strct_pruning": False,
     "is_global": False,
+    "sparsity_ratio_granularity": "layer",
 }
 
 # loads BLIP2-FLAN-T5XL caption model,

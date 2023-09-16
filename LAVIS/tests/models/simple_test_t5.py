@@ -39,6 +39,7 @@ config = {
     "keep_indices_cache": None,
     "is_strct_pruning": False,
     "is_global": False,
+    "sparsity_ratio_granularity": "layer"
 }
 
 # loads BLIP2-FLAN-T5XL caption model,

@@ -53,7 +53,7 @@ def parse_args():
     )
 
     parser.add_argument(
-        "--side_pretrained_weight",
+        "--t5_prune_spec",
         type=str,
         default=None,
         help="The pre-trained config for the distilled transformer."
@@ -148,7 +148,7 @@ def parse_args():
     )
 
     parser.add_argument(
-        "--num_data", type=int, default=64
+        "--num_data", type=int, default=128
     )
 
     parser.add_argument(
@@ -209,6 +209,22 @@ def parse_args():
     
     parser.add_argument(
         "--pruning_method", type=str,
+    )
+    
+    parser.add_argument(
+        "--sparsity_ratio_granularity",
+        type=str,
+        default=None,
+    )
+    
+    parser.add_argument(
+        "--max_sparsity_per_layer", type=float, default=0.8
+    )
+    
+    parser.add_argument(
+        "--score_method",
+        type=str,
+        default="obd_avg",
     )
 
     args = parser.parse_args()
@@ -278,11 +294,15 @@ def main():
     data_loader = runner.get_dataloader_for_importance_computation(num_data=args.num_data, power=args.power)
     
     config = {
-        "prune_spec": "24-0.5-1.0-1.0",
+        "prune_spec": args.t5_prune_spec,
         "importance_scores_cache": None,
         "keep_indices_cache": None,
         "is_strct_pruning": False,
         "is_global": False,
+        "num_samples": args.num_data,
+        "sparsity_ratio_granularity": args.sparsity_ratio_granularity,
+        "max_sparsity_per_layer": args.max_sparsity_per_layer,
+        "score_method": args.score_method,
     }
     pruner = load_pruner(
         args.pruning_method, runner.unwrap_dist_model(runner.model).eval(), 
@@ -294,7 +314,7 @@ def main():
         param.numel() for param in model.parameters()
     )
     
-    model, _ = pruner.prune()
+    model, sparsity_dict = pruner.prune()
 
     distilled_total_size = sum(
         (param != 0).float().sum() for param in model.parameters()
@@ -309,6 +329,15 @@ def main():
         torch.save(model.state_dict(), os.path.join(saved_folder, job_id + ".pth"))
 
         print(os.path.join(saved_folder, job_id + ".pth"))
+        
+        # save sparsity dict
+        if sparsity_dict is not None and isinstance(sparsity_dict, dict):
+            saved_folder = "sparsity_dict"
+            os.makedirs(saved_folder, exist_ok=True)
+            
+            import yaml
+            with open(os.path.join(saved_folder, job_id + ".yaml"), "w") as f:
+                yaml.dump(sparsity_dict, f)
 
         exit()
 

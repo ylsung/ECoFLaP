@@ -36,7 +36,6 @@ from lavis.compression.modify_model_with_weight_init import t5_modify_with_weigh
 from lavis.compression.modify_vit_with_weight_init import vit_modify_with_weight_init
 
 from lavis.compression.modify_qformer_with_weight_init import qformer_pruning
-from lavis.compression.woodfisher.woodfisher import WoodFisher
 
 
 def parse_args():
@@ -175,31 +174,15 @@ def parse_args():
     )
 
     parser.add_argument(
+        "--save_importance_measure", action="store_true"
+    )
+    
+    parser.add_argument(
         "--vit_pruned_indices", type=str, default=None
     )
 
     parser.add_argument(
         "--t5_pruned_indices", type=str, default=None
-    )
-
-    parser.add_argument(
-        "--save_importance_measure", action="store_true"
-    )
-
-    parser.add_argument(
-        "--vit_importance_measure", type=str, default=None
-    )
-
-    parser.add_argument(
-        "--t5_importance_measure", type=str, default=None
-    )
-
-    parser.add_argument(
-        "--vision_weight", type=float, default=0.0
-    )
-
-    parser.add_argument(
-        "--save_final_activations", action="store_true"
     )
 
     args = parser.parse_args()
@@ -220,19 +203,13 @@ def setup_seeds(config):
     cudnn.deterministic = True
 
 
-def get_final_activations(args, cfg, task, model, datasets):
-    runner = RunnerBase(
-        cfg=cfg, job_id=None, task=task, model=model, datasets=datasets
-    )
-    start = time.time()
-
-    print("Start to get final activation")
-    outputs = runner.get_last_activations(num_data=args.num_data, power=args.power)
-
-    end = time.time()
-    print(f"Finish get final activation, using {end - start:.3f}s")
-
-    return outputs
+def check_one_variable_is_none(var1, var2):
+    if var1 is None and var2 is not None:
+        return True
+    elif var1 is not None and var2 is None:
+        return True
+    else:
+        return False
 
 
 def main():
@@ -262,41 +239,26 @@ def main():
     datasets = task.build_datasets(cfg)
     model = task.build_model(cfg)
 
+    assert check_one_variable_is_none(args.vit_pruned_indices, args.t5_pruned_indices)
 
-    woodfisher_pruner = None
+    # The condition: prune first
+    vit_pruned_indices = None
+    if args.vit_pruned_indices is not None:
+        vit_pruned_indices = torch.load(args.vit_pruned_indices)
+        vit_pruned_indices = vit_pruned_indices["vit"]
+        model.visual_encoder, vit_pruned_indices, vit_importance_measure = vit_modify_with_weight_init(model.visual_encoder, args, model.freeze_vit, model.vit_precision, None, pruned_indices=vit_pruned_indices)
+
+    t5_pruned_indices = None
+    if args.t5_pruned_indices is not None:
+        t5_pruned_indices = torch.load(args.t5_pruned_indices)
+        t5_pruned_indices = t5_pruned_indices["t5"]
+        model.t5_model, t5_pruned_indices, t5_importance_measure = t5_modify_with_weight_init(model.t5_model, args, None, to_bf16=True, pruned_indices=t5_pruned_indices)
 
     is_strct_pruning = False
     if args.distillation_init is not None:
         is_strct_pruning = "unstrct" in args.distillation_init
-    
-    if "woodfisher" in args.distillation_init and args.get_derivative_info:
-        print("Setup for computing wood fisher")
 
-        runner = RunnerBase(
-            cfg=cfg, job_id=None, task=task, model=model, datasets=datasets
-        )
-
-        start = time.time()
-
-        print("Start to compute wood fisher")
-        wood_dataloader = runner.get_dataloader_for_importance_computation(num_data=args.num_data, power=args.power)
-
-        
-        woodfisher_pruner = WoodFisher(
-            runner.unwrap_dist_model(runner.model).eval(), 
-            wood_dataloader, 
-            num_samples=args.num_data, fisher_damp=1e-3, fisher_parts=5, fisher_optimized=False, ignore_keys=[]
-        )
-
-        importance_scores = woodfisher_pruner.compute_fisher_inv_and_importance_score()
-
-        vit_derivative_info = {k[15:]: v for k, v in derivative_info.items() if k.startswith("visual_encoder")} # filter out some info that is not for this transformer
-        t5_derivative_info = {k[9:]: v for k, v in derivative_info.items() if k.startswith("t5_model")} # filter out some info that is not for this transformer
-
-        end = time.time()
-        print(f"Finish computing wood fisher, using {end - start:.3f}s")
-
-    elif args.get_derivative_info:
+    if args.get_derivative_info:
         print("Setup for computing derivatice info")
 
         runner = RunnerBase(
@@ -306,7 +268,7 @@ def main():
         start = time.time()
 
         print("Start to compute derivatice info")
-        derivative_info = runner.get_data_derivative(num_data=args.num_data, power=args.power, num_logits=args.num_logits, vision_weight=args.vision_weight)
+        derivative_info = runner.get_data_derivative(num_data=args.num_data, power=args.power, num_logits=args.num_logits)
 
         vit_derivative_info = {k[15:]: v for k, v in derivative_info.items() if k.startswith("visual_encoder")} # filter out some info that is not for this transformer
         t5_derivative_info = {k[9:]: v for k, v in derivative_info.items() if k.startswith("t5_model")} # filter out some info that is not for this transformer
@@ -344,44 +306,15 @@ def main():
         param.numel() for param in model.parameters()
     )
 
-    vit_importance_measure = None
-    if args.vit_importance_measure is not None:
-        vit_importance_measure = torch.load(args.vit_importance_measure)
-        vit_importance_measure = vit_importance_measure["vit"]
+    # if the vit is not originally pruned, do the conditional pruning now
+    if vit_pruned_indices is None:
+        model.visual_encoder, vit_pruned_indices, vit_importance_measure = vit_modify_with_weight_init(model.visual_encoder, args, model.freeze_vit, model.vit_precision, vit_derivative_info, pruned_indices=vit_pruned_indices)
 
-    vit_pruned_indices = None
-    if args.vit_pruned_indices is not None:
-        vit_pruned_indices = torch.load(args.vit_pruned_indices)
-        vit_pruned_indices = vit_pruned_indices["vit"]
-    
-    model.visual_encoder, vit_prune_indices, vit_importance_measure = vit_modify_with_weight_init(model.visual_encoder, args, model.freeze_vit, model.vit_precision, vit_derivative_info, pruned_indices=vit_pruned_indices, importance_measure=vit_importance_measure, woodfisher_pruner=woodfisher_pruner)
-    
-    t5_importance_measure = None
-    if args.t5_importance_measure is not None:
-        t5_importance_measure = torch.load(args.t5_importance_measure)
-        t5_importance_measure = t5_importance_measure["t5"]
-
-    t5_pruned_indices = None
-    if args.t5_pruned_indices is not None:
-        t5_pruned_indices = torch.load(args.t5_pruned_indices)
-        t5_pruned_indices = t5_pruned_indices["t5"]
-
-    model.t5_model, t5_prune_indices, t5_importance_measure = t5_modify_with_weight_init(model.t5_model, args, t5_derivative_info, to_bf16=True, pruned_indices=t5_pruned_indices, importance_measure=t5_importance_measure, woodfisher_pruner=woodfisher_pruner)
+    if t5_pruned_indices is None:
+        model.t5_model, t5_pruned_indices, t5_importance_measure = t5_modify_with_weight_init(model.t5_model, args, t5_derivative_info, pruned_indices=t5_pruned_indices)
 
     for name, param in model.t5_model.named_parameters():
         param.requires_grad = False
-
-    if args.save_final_activations:
-        outputs = get_final_activations(args=args, cfg=cfg, task=task, model=model, datasets=datasets)
-
-        saved_folder = "final_activations"
-        os.makedirs(saved_folder, exist_ok=True)
-
-        torch.save(outputs, os.path.join(saved_folder, job_id + ".pth"))
-
-        print(os.path.join(saved_folder, job_id + ".pth"))
-
-        exit()
 
     if args.save_pruned_indices:
 
@@ -389,8 +322,8 @@ def main():
         os.makedirs(saved_folder, exist_ok=True)
 
         pruned_indices = {
-            "t5": t5_prune_indices,
-            "vit": vit_prune_indices,
+            "t5": t5_pruned_indices,
+            "vit": vit_pruned_indices,
         }
 
         torch.save(pruned_indices, os.path.join(saved_folder, job_id + ".pth"))
@@ -424,8 +357,8 @@ def main():
             model.Qformer, 
             model.t5_proj, 
             model.init_Qformer, 
-            vit_prune_indices["P_vit_res"] if vit_prune_indices is not None else None, 
-            t5_prune_indices["P_res"] if t5_prune_indices is not None else None
+            vit_pruned_indices["P_vit_res"] if vit_pruned_indices is not None else None, 
+            t5_pruned_indices["P_res"] if t5_pruned_indices is not None else None
         )
 
         distilled_total_size = sum(

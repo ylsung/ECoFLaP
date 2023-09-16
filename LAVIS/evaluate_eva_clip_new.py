@@ -41,6 +41,8 @@ from lavis.compression.modify_vit_with_weight_init import vit_modify_with_weight
 
 from lavis.compression.modify_qformer_with_weight_init import qformer_pruning
 
+from lavis.compression import load_pruner
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Training")
@@ -56,13 +58,6 @@ def parse_args():
 
     parser.add_argument(
         "--side_pretrained_weight",
-        type=str,
-        default=None,
-        help="The pre-trained config for the distilled transformer."
-    )
-
-    parser.add_argument(
-        "--vit_side_pretrained_weight",
         type=str,
         default=None,
         help="The pre-trained config for the distilled transformer."
@@ -150,7 +145,7 @@ def parse_args():
     )
 
     parser.add_argument(
-        "--num_data", type=int, default=64
+        "--num_data", type=int, default=128
     )
 
     parser.add_argument(
@@ -188,7 +183,45 @@ def parse_args():
     parser.add_argument(
         "--importance_measure", type=str, default=None
     )
-
+    
+    parser.add_argument(
+        "--save_pruned_model", action="store_true"
+    )
+    
+    parser.add_argument(
+        "--vit_pruned_checkpoint",
+        type=str,
+        default=None,
+        help="The pre-trained checkpoint for vit"
+    )
+    
+    parser.add_argument(
+        "--pruning_method", type=str,
+    )
+    
+    parser.add_argument(
+        "--vit_prune_spec",
+        type=str,
+        default=None,
+        help="The pre-trained config for the distilled transformer."
+    )
+    
+    parser.add_argument(
+        "--sparsity_ratio_granularity",
+        type=str,
+        default=None,
+    )
+    
+    parser.add_argument(
+        "--max_sparsity_per_layer", type=float, default=0.8
+    )
+    
+    parser.add_argument(
+        "--score_method",
+        type=str,
+        default="obd_avg",
+    )
+    
     args = parser.parse_args()
     # if 'LOCAL_RANK' not in os.environ:
     #     os.environ['LOCAL_RANK'] = str(args.local_rank)
@@ -264,154 +297,92 @@ def main():
     datasets = task.build_datasets(cfg)
     model = task.build_model(cfg)
 
-    is_strct_pruning = False
-    if args.distillation_init is not None:
-        is_strct_pruning = "unstrct" in args.distillation_init
-
-    if args.get_derivative_info:
-        print("Setup for computing derivatice info")
-
-        runner = RunnerBase(
-            cfg=cfg, job_id=None, task=task, model=model, datasets=datasets
-        )
-
-        start = time.time()
-
-        print("Start to compute derivatice info")
-        derivative_info = runner.get_data_derivative(num_data=args.num_data, power=args.power, num_logits=args.num_logits)
-
-        derivative_info = {k[7:]: v for k, v in derivative_info.items() if k.startswith("visual")} # filter out some info that is not for this transformer
-
-        end = time.time()
-        print(f"Finish computing derivatice info, using {end - start:.3f}s")
-        # for n, p in derivative_info.items():
-        #     print(n, p.shape)
-
-    elif args.get_activation_info:
-        print("Setup for computing activation info")
-
-        runner = RunnerBase(
-            cfg=cfg, job_id=None, task=task, model=model, datasets=datasets
-        )
-
-        start = time.time()
-
-        print("Start to compute activation info")
-        input_representations, output_representations = runner.get_activations(num_data=args.num_data, power=args.power)
-
-        derivative_info = runner.convert_activation_to_importance(input_representations, output_representations, args.use_input_activation)
-
-        derivative_info = {k[7:]: v for k, v in derivative_info.items() if k.startswith("visual")} # filter out some info that is not for this transformer
-
-        end = time.time()
-        print(f"Finish computing activation info, using {end - start:.3f}s")
-    else:
-        derivative_info = None
-
-    pruned_indices = None
-    distilled_modify_func = None
-    if args.pruned_indices is not None:
-        pruned_indices = torch.load(args.pruned_indices)
-
-        pruned_indices = pruned_indices["vit"]
-
-        if is_strct_pruning:
-            pruned_indices = unstrct_generate_missing_mask(model.visual, pruned_indices)
-        else:
-            p_device = pruned_indices[f"P_vit_ffn_38"].device
-            
-            # pruned_indices[f"P_vit_ffn_39"] = pruned_indices[f"P_vit_ffn_38"]
-            
-            ffn_dim = int(model.visual.embed_dim * model.visual.mlp_ratio)
-            embed_dim = len(pruned_indices[f"P_vit_res"])
-
-            num_heads = model.visual.num_heads
-
-            pruned_indices[f"P_vit_ffn_39"] = torch.arange(ffn_dim).to(p_device)
-
-            for i in range(num_heads):
-                pruned_indices[f"P_vit_self_qk_39_{i}"] = torch.arange(embed_dim//num_heads).to(p_device)
-                pruned_indices[f"P_vit_self_vo_39_{i}"] = torch.arange(embed_dim//num_heads).to(p_device)
-
-            distilled_modify_func = partial(
-                modify_distilled_clip, 
-                embed_dim=embed_dim, 
-                attn_dim=embed_dim,
-                ffn_dim=ffn_dim, 
-                layer_ids=['39'],
-            )
-
     orig_total_size = sum(
         param.numel() for param in model.visual.parameters()
     )
+    
+    sparsity_dict = None
+    if args.vit_pruned_checkpoint is not None:
+        print("Load vit pruned weight")
+        prune_state_dict = torch.load(args.vit_pruned_checkpoint, map_location="cpu")
+        
+        prune_state_dict = {k.replace("visual.", ""): v for k, v in prune_state_dict.items()}
+        original_checkpoints = model.visual.state_dict()
+        original_checkpoints.update(prune_state_dict)
+        prune_state_dict = original_checkpoints
+        model.visual.load_state_dict(prune_state_dict)
 
-    vit_importance_measure = None
-    if args.importance_measure is not None:
-        vit_importance_measure = torch.load(args.importance_measure)
-        vit_importance_measure = vit_importance_measure["vit"]
-
-    model.visual, vit_prune_indices, vit_importance_measure = vit_modify_with_weight_init(model.visual, args, False, "fp32", derivative_info, pruned_indices=pruned_indices, distilled_modify_func=distilled_modify_func, importance_measure=vit_importance_measure)
-
-    if args.save_pruned_indices:
-
-        saved_folder = "pruned_indices"
-        os.makedirs(saved_folder, exist_ok=True)
-
-        num_heads = model.visual.num_heads
-
-        if is_strct_pruning:
-            for k in list(vit_prune_indices.keys()):
-                if "blocks.39" in k:
-                    del vit_prune_indices[k]
-                    print(f"{k} is deleted.")
-        else:
-            for k in list(vit_prune_indices.keys()):
-                if "_39" in k:
-                    del vit_prune_indices[k]
-                    print(f"{k} is deleted.")
-
-        pruned_indices = {
-            "vit": vit_prune_indices,
-        }
-
-        torch.save(pruned_indices, os.path.join(saved_folder, job_id + ".pth"))
-
-        print(os.path.join(saved_folder, job_id + ".pth"))
-
-        exit()
-
-    if args.save_importance_measure:
-        saved_folder = "importance_measure"
-        os.makedirs(saved_folder, exist_ok=True)
-
-        importance_measure = {
-            "vit": vit_importance_measure,
-        }
-
-        torch.save(importance_measure, os.path.join(saved_folder, job_id + ".pth"))
-
-        print(os.path.join(saved_folder, job_id + ".pth"))
-
-        exit()
-
-    # model.t5_model, t5_prune_indices = t5_modify_with_weight_init(model.t5_model, args, derivative_info)
-
-    # model.Qformer, model.t5_proj = qformer_pruning(
-    #     model.Qformer, 
-    #     model.t5_proj, 
-    #     model.init_Qformer, 
-    #     vit_prune_indices["P_vit_res"] if vit_prune_indices is not None else None, 
-    #     t5_prune_indices["P_res"] if t5_prune_indices is not None else None
-    # )
-
-    if is_strct_pruning:
-        distilled_total_size = sum(
-            (param != 0).sum() for param in model.visual.parameters()
-        )
     else:
-        distilled_total_size = sum(
-            param.numel() for param in model.visual.parameters()
+        runner = RunnerBase(
+            cfg=cfg, job_id=None, task=task, model=model, datasets=datasets
         )
+        data_loader = runner.get_dataloader_for_importance_computation(num_data=args.num_data, power=args.power)
+        
+        config = {
+            "prune_spec": args.vit_prune_spec,
+            "importance_scores_cache": None,
+            "keep_indices_cache": None,
+            "is_strct_pruning": False,
+            "is_global": False,
+            "num_samples": args.num_data,
+            "sparsity_ratio_granularity": args.sparsity_ratio_granularity,
+            "max_sparsity_per_layer": args.max_sparsity_per_layer,
+            "score_method": args.score_method,
+        }
+
+        # set up the classifier
+        runner.task.before_evaluation(
+            model=runner.unwrap_dist_model(runner.model).eval(),
+            dataset=data_loader.dataset,
+        )
+        
+        del model.text
+        
+        pruner = load_pruner(
+            args.pruning_method, runner.unwrap_dist_model(runner.model).eval(), 
+            data_loader, 
+            cfg=config
+        )
+        model, sparsity_dict = pruner.prune()
+
+    distilled_total_size = sum(
+        (param != 0).float().sum() for param in model.visual.parameters()
+    )
+    
+    print(distilled_total_size / orig_total_size * 100)
+    
+    if args.save_pruned_model:
+        saved_folder = "pruned_checkpoint"
+        os.makedirs(saved_folder, exist_ok=True)
+        
+        def filter_checkpoint(state_dict):
+            def condition_to_keep(name):
+                if "blocks.39" in name:
+                    return False
+                if "visual." not in name:
+                    return False
+                
+                return True
+                
+            return {k: v for k, v in state_dict.items() if condition_to_keep(k)}
+        
+        torch.save(
+            filter_checkpoint(model.state_dict()), 
+            os.path.join(saved_folder, job_id + ".pth")
+        )
+
+        print(os.path.join(saved_folder, job_id + ".pth"))
+        
+        # save sparsity dict
+        if sparsity_dict is not None and isinstance(sparsity_dict, dict):
+            saved_folder = "sparsity_dict"
+            os.makedirs(saved_folder, exist_ok=True)
+
+            import yaml
+            with open(os.path.join(saved_folder, job_id + ".yaml"), "w") as f:
+                yaml.dump(sparsity_dict, f)
+
+        exit()
 
     # for name, param in model.t5_model.named_parameters():
     #     param.requires_grad = False

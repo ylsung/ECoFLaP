@@ -13,6 +13,7 @@ import numpy as np
 from collections import OrderedDict
 from copy import deepcopy
 from pathlib import Path
+import contextlib
 
 import torch
 import torch.nn.functional as F
@@ -393,6 +394,16 @@ class EVA_CLIP(BaseModel):
 
         self.prompt_templates = openai_imagenet_template
         self.classifier = None
+        
+    def maybe_autocast(self, dtype=torch.float32):
+        # if on cpu, don't use autocast
+        # if on gpu, use autocast with dtype if provided, otherwise use torch.float16
+        enable_autocast = self.device != torch.device("cpu")
+
+        if enable_autocast:
+            return torch.cuda.amp.autocast(dtype=dtype)
+        else:
+            return contextlib.nullcontext()
 
     def encode_image(self, image):
         return self.visual(image)

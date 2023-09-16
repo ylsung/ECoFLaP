@@ -14,7 +14,7 @@ for folder in folders:
 
     try:
         with open(folder + "/evaluate.txt", "r") as f:
-            results = f.readlines()[0].strip()
+            results = f.readlines()[-1].strip()
             print(idx, results)
     except:
         print(f"{folder} has no evaluate file.")

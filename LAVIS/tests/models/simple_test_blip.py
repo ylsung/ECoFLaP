@@ -34,6 +34,7 @@ config = {
     "keep_indices_cache": None,
     "is_strct_pruning": False,
     "is_global": False,
+    "sparsity_ratio_granularity": "layer",
 }
 
 # loads BLIP2-FLAN-T5XL caption model,
@@ -64,7 +65,7 @@ class DSet(torch.utils.data.Dataset):
         
 dset = DSet()
 
-method = "blipt5_obd_pruner"
+method = "blipt5_wanda_pruner"
 
 dloader = torch.utils.data.DataLoader(dset, batch_size=1)
 pruner = load_pruner(method, model, dloader, cfg=config)
@@ -73,13 +74,21 @@ total_size = sum(
     param.numel() for param in model.parameters()
 )
 
+image = vis_processors["eval"](raw_image).unsqueeze(0).to(device)
+
+base_caption = model.generate({"image": image})
+
 model, _ = pruner.prune()
 
-image = vis_processors["eval"](raw_image).unsqueeze(0).to(device)
+# state_dict = torch.load("pruned_checkpoint/cc3m-blipt5_wanda_pruner_0.5-1.0-1.0.pth")
+
+# model.load_state_dict(state_dict)
+
 
 # generate caption
 caption = model.generate({"image": image})
 
+print(base_caption)
 print(caption)
 
 # generate multiple captions

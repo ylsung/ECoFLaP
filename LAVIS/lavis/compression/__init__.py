@@ -21,7 +21,9 @@ from lavis.compression.pruners.obd_pruner import (
     BLIPT5OBDPruner,
 )
 
-from lavis.compression.pruners.wanda_pruner import T5LayerWandaPruner, VITLayerWandaPruner
+from lavis.compression.pruners.wanda_pruner import (
+    T5LayerWandaPruner, VITLayerWandaPruner, BLIPT5LayerWandaPruner
+)
 from lavis.common.registry import registry
 
 from omegaconf import OmegaConf

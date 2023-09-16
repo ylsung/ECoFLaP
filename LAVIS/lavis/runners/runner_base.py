@@ -670,6 +670,26 @@ class RunnerBase:
 
         self.config.run_cfg.batch_size_train = batch_size_train_record
         self.config.run_cfg.batch_size_eval = batch_size_eval_record
+        
+        class DataLoaderWrapper:
+            def __init__(self, dataloader, length):
+                self.dataloader = dataloader
+                self.dataset = dataloader.dataset
+                self.length = min(length, len(dataloader))
+
+            def __iter__(self):
+                counter = 0
+                for batch in self.dataloader:
+                    if counter < self.length:
+                        yield batch
+                        counter += 1
+                    else:
+                        break
+
+            def __len__(self):
+                return self.length
+            
+        data_loader = DataLoaderWrapper(data_loader, num_data//batch_size)
 
         # get the activations by forwarding the data through the model
         return data_loader
