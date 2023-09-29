@@ -1,6 +1,6 @@
 # ECoFLaP: Efficient Coarse-to-Fine Layer-Wise Pruning for Vision-Language Models
 
-The main code is in `/LAVIS`.
+The main code is in `LAVIS/`.
 
 ## Installation
 ```
@@ -10,7 +10,7 @@ pip install -e .
 
 ## BLIP-2 Scripts
 
-In `/LAVIS`
+In `LAVIS/`
 
 ```bash
 # ECoFLaP - zeroth order
