@@ -226,6 +226,36 @@ def parse_args():
         type=str,
         default="obd_avg",
     )
+    
+    parser.add_argument(
+        "--num_data_first_stage", type=int, default=32
+    )
+    
+    parser.add_argument(
+        "--num_noise", default=1, type=int,
+    )
+    
+    parser.add_argument(
+        "--sparsity_dict",
+        type=str,
+        default=None,
+    )
+    
+    parser.add_argument(
+        "--prune_per_model",
+        action="store_true"
+    )
+    
+    parser.add_argument(
+        "--iteration",
+        type=int,
+        default=1,
+    )
+    
+    parser.add_argument(
+        "--is_global",
+        action="store_true"
+    )
 
     args = parser.parse_args()
     # if 'LOCAL_RANK' not in os.environ:
@@ -298,11 +328,16 @@ def main():
         "importance_scores_cache": None,
         "keep_indices_cache": None,
         "is_strct_pruning": False,
-        "is_global": False,
+        "is_global": args.is_global,
         "num_samples": args.num_data,
         "sparsity_ratio_granularity": args.sparsity_ratio_granularity,
         "max_sparsity_per_layer": args.max_sparsity_per_layer,
         "score_method": args.score_method,
+        "num_data_first_stage": args.num_data_first_stage,
+        "num_noise": args.num_noise,
+        "sparsity_dict": args.sparsity_dict,
+        "prune_per_model": args.prune_per_model,
+        "iteration": args.iteration,
     }
     pruner = load_pruner(
         args.pruning_method, runner.unwrap_dist_model(runner.model).eval(), 

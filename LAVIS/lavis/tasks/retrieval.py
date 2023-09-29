@@ -45,8 +45,17 @@ class RetrievalTask(BaseTask):
             eval_result = None
 
         return eval_result
-
+    
     def after_evaluation(self, val_result, **kwargs):
+        
+        val_result["orig_size"] = f'{kwargs["orig_total_size"] / 10 ** 9:.3f} B'
+        val_result["dist_size"] = f'{kwargs["distilled_total_size"] / 10 ** 9:.3f} B'
+        
+        with open(
+            os.path.join(registry.get_path("output_dir"), "evaluate.txt"), "a"
+        ) as f:
+            f.write(json.dumps(val_result) + "\n")
+
         return val_result
 
     @staticmethod
@@ -100,8 +109,5 @@ class RetrievalTask(BaseTask):
             "r_mean": r_mean,
             "agg_metrics": agg_metrics,
         }
-        with open(
-            os.path.join(registry.get_path("output_dir"), "evaluate.txt"), "a"
-        ) as f:
-            f.write(json.dumps(eval_result) + "\n")
+
         return eval_result

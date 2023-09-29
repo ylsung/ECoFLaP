@@ -5,24 +5,33 @@
 # from lavis.compression.woodfisher_pruner import WoodFisherPruner
 from lavis.compression.pruners.base_pruner import BasePruner
 from lavis.compression.pruners.single_base_pruner import SingleBasePruner
-from lavis.compression.pruners.mag_pruner import (
-    StrctMagPruner, 
-    UnstrctMagPruner, 
-    T5MagPruner, 
-    VITMagPruner,
-    BLIPT5MagPruner,
-)
+# from lavis.compression.pruners.mag_pruner import (
+#     StrctMagPruner, 
+#     UnstrctMagPruner, 
+#     T5MagPruner, 
+#     VITMagPruner,
+#     BLIPT5MagPruner,
+# )
 
-from lavis.compression.pruners.obd_pruner import (
-    StrctOBDPruner, 
-    UnstrctOBDPruner, 
-    T5OBDPruner, 
-    VITOBDPruner,
-    BLIPT5OBDPruner,
+# from lavis.compression.pruners.obd_pruner import (
+#     StrctOBDPruner, 
+#     UnstrctOBDPruner, 
+#     T5OBDPruner, 
+#     VITOBDPruner,
+#     BLIPT5OBDPruner,
+# )
+
+from lavis.compression.pruners.global_pruner import (
+    BLIPT5MagPruner,
+    BLIPT5AOBDPruner,
+    BLIPT5AMeZoPruner,
 )
 
 from lavis.compression.pruners.wanda_pruner import (
     T5LayerWandaPruner, VITLayerWandaPruner, BLIPT5LayerWandaPruner
+)
+from lavis.compression.pruners.sparsegpt_pruner import (
+    T5LayerSparseGPTPruner, VITLayerSparseGPTPruner, BLIPT5LayerSparseGPTPruner
 )
 from lavis.common.registry import registry
 
@@ -31,16 +40,6 @@ from omegaconf import OmegaConf
 __all__ = [
     # "WoodFisherPruner",
     "BasePruner",
-    "StrctMagPruner",
-    "UnstrctMagPruner",
-    "StrctOBDPruner",
-    "UnstrctOBDPruner",
-    "T5OBDPruner",
-    "T5MagPruner",
-    "VITMagPruner",
-    "VITOBDPruner",
-    "BLIPT5MagPruner",
-    "BLIPT5OBDPruner",
 ]
 
 

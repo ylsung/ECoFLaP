@@ -1,9 +1,11 @@
 import torch
+import math
 import torch.nn as nn
 
 from time import time
 from copy import deepcopy
 from functools import partial
+import transformers
 
 from lavis.common.registry import registry
 from lavis.datasets.data_utils import prepare_sample
@@ -56,42 +58,178 @@ def find_layers(module, layers=[nn.Linear], name=''):
         ))
     return res
 
-class WrappedGPT:
-    """
-    This class wraps a GPT layer for specific operations.
-    """
+class SparseGPT:
 
-    def __init__(self, layer, layer_id=0, layer_name="none"):
+    def __init__(self, layer):
         self.layer = layer
         self.dev = self.layer.weight.device
-        self.rows = layer.weight.data.shape[0]
-        self.columns = layer.weight.data.shape[1]
-
-        self.scaler_row = torch.zeros((self.columns), device=self.dev)
+        W = layer.weight.data.clone()
+        if isinstance(self.layer, nn.Conv2d):
+            W = W.flatten(1)
+        if isinstance(self.layer, transformers.Conv1D):
+            W = W.t()
+        self.rows = W.shape[0]
+        self.columns = W.shape[1]
+        self.H = torch.zeros((self.columns, self.columns), device=self.dev)
         self.nsamples = 0
-
-        self.layer_id = layer_id 
-        self.layer_name = layer_name
 
     def add_batch(self, inp, out):
         if len(inp.shape) == 2:
             inp = inp.unsqueeze(0)
         tmp = inp.shape[0]
-        if isinstance(self.layer, nn.Linear):
+        if isinstance(self.layer, nn.Linear) or isinstance(self.layer, transformers.Conv1D):
             if len(inp.shape) == 3:
                 inp = inp.reshape((-1, inp.shape[-1]))
             inp = inp.t()
-
-        self.scaler_row *= self.nsamples / (self.nsamples+tmp)
+        self.H *= self.nsamples / (self.nsamples + tmp)
         self.nsamples += tmp
+        inp = math.sqrt(2 / self.nsamples) * inp.float()
+        self.H += inp.matmul(inp.t())
 
-        inp = inp.type(torch.float32)
-        self.scaler_row += torch.norm(inp, p=2, dim=1) ** 2  / self.nsamples
+    def fasterprune(
+        self, sparsity, prune_n=0, prune_m=0, blocksize=128, percdamp=.01
+    ):
+        W = self.layer.weight.data.clone()
+        if isinstance(self.layer, nn.Conv2d):
+            W = W.flatten(1)
+        if isinstance(self.layer, transformers.Conv1D):
+            W = W.t()
+        W = W.float()
+
+        tick = time()
+
+        H = self.H
+        del self.H
+        dead = torch.diag(H) == 0
+        H[dead, dead] = 1
+        W[:, dead] = 0
+
+        Losses = torch.zeros(self.rows, device=self.dev)
+        
+        if (torch.isinf(H) * (H > 0)).float().sum() > 0:
+            # positive inf value
+            pos = torch.isinf(H) * (H > 0)
+            H[pos] = torch.quantile(H, 0.999)
+            
+        if (torch.isinf(H) * (H < 0)).float().sum() > 0:
+            # negative inf value
+            pos = torch.isinf(H) * (H < 0)
+            H[pos] = torch.quantile(H, 0.001)
+            
+        damp = percdamp * torch.mean(torch.diag(H))
+        diag = torch.arange(self.columns, device=self.dev)
+        
+        while True:
+            try:
+                decompose_H = torch.linalg.cholesky(H)
+                
+                if not torch.isnan(decompose_H).any():
+                    H = decompose_H
+                    break
+                
+                if torch.isinf(damp).any():
+                    import pdb; pdb.set_trace()
+                # not a positive semi-definite matrix
+                H[diag, diag] += damp
+            except:
+                # not a positive semi-definite matrix
+                H[diag, diag] += damp
+        # H[diag, diag] += damp
+        # H = torch.linalg.cholesky(H)
+        H = torch.cholesky_inverse(H)
+        
+        if (torch.isinf(H) * (H > 0)).float().sum() > 0:
+            # positive inf value
+            pos = torch.isinf(H) * (H > 0)
+            H[pos] = torch.quantile(H, 0.999)
+            
+        if (torch.isinf(H) * (H < 0)).float().sum() > 0:
+            # negative inf value
+            pos = torch.isinf(H) * (H < 0)
+            H[pos] = torch.quantile(H, 0.001)
+            
+        damp = percdamp * torch.mean(torch.diag(H).abs())
+        diag = torch.arange(self.columns, device=self.dev)
+        
+        while True:
+            try:
+                decompose_H = torch.linalg.cholesky(H, upper=True)
+                
+                if not torch.isnan(decompose_H).any():
+                    H = decompose_H
+                    break
+                # not a positive semi-definite matrix
+                H[diag, diag] += damp
+            except:
+                # not a positive semi-definite matrix
+                H[diag, diag] += damp
+
+        # H = torch.linalg.cholesky(H, upper=True)
+        Hinv = H
+        
+        
+        s = W ** 2 / (torch.diag(Hinv).reshape((1, -1))) ** 2
+        
+        setattr(self.layer.weight, "importance_score", s.cpu().abs().mean().item())
+
+        mask = None
+
+        for i1 in range(0, self.columns, blocksize):
+            i2 = min(i1 + blocksize, self.columns)
+            count = i2 - i1
+
+            W1 = W[:, i1:i2].clone()
+            Q1 = torch.zeros_like(W1)
+            Err1 = torch.zeros_like(W1)
+            Losses1 = torch.zeros_like(W1)
+            Hinv1 = Hinv[i1:i2, i1:i2]
+
+            if prune_n == 0: 
+                if mask is not None:
+                    mask1 = mask[:, i1:i2]
+                else:
+                    tmp = W1 ** 2 / (torch.diag(Hinv1).reshape((1, -1))) ** 2
+                    thresh = torch.sort(tmp.flatten())[0][int(tmp.numel() * sparsity)]
+                    mask1 = tmp <= thresh
+            else:
+                mask1 = torch.zeros_like(W1) == 1
+
+            for i in range(count):
+                w = W1[:, i]
+                d = Hinv1[i, i]
+
+                if prune_n != 0 and i % prune_m == 0:
+                    tmp = W1[:, i:(i + prune_m)] ** 2 / (torch.diag(Hinv1)[i:(i + prune_m)].reshape((1, -1))) ** 2
+                    mask1.scatter_(1, i + torch.topk(tmp, prune_n, dim=1, largest=False)[1], True)
+
+                q = w.clone()
+                q[mask1[:, i]] = 0
+
+                Q1[:, i] = q
+                Losses1[:, i] = (w - q) ** 2 / d ** 2
+
+                err1 = (w - q) / d 
+                W1[:, i:] -= err1.unsqueeze(1).matmul(Hinv1[i, i:].unsqueeze(0))
+                Err1[:, i] = err1
+
+            W[:, i1:i2] = Q1
+            Losses += torch.sum(Losses1, 1) / 2
+
+            W[:, i2:] -= Err1.matmul(Hinv[i1:i2, i2:])
+
+        torch.cuda.synchronize()
+        if isinstance(self.layer, transformers.Conv1D):
+            W = W.t()
+        self.layer.weight.data = W.reshape(self.layer.weight.shape).to(self.layer.weight.data.dtype)
+
+    def free(self):
+        self.H = None
+        torch.cuda.empty_cache()
 
 
-@registry.register_pruner("t5_wanda_pruner")
-class T5LayerWandaPruner(LayerWiseBasePruner):
-    pruner_name = "t5_wanda_pruner"
+@registry.register_pruner("t5_sparsegpt_pruner")
+class T5LayerSparseGPTPruner(LayerWiseBasePruner):
+    pruner_name = "t5_sparsegpt_pruner"
     def __init__(
         self,
         model,
@@ -128,6 +266,7 @@ class T5LayerWandaPruner(LayerWiseBasePruner):
             num_noise=num_noise,
             sparsity_dict=sparsity_dict,
         )
+        
         self.pruning_func = t5_strct_pruning if self.is_strct_pruning else t5_unstrct_pruning
         
         self.loss_func = loss_language
@@ -298,7 +437,7 @@ class T5LayerWandaPruner(LayerWiseBasePruner):
 
             wrapped_layers = {}
             for name in subset:
-                wrapped_layers[name] = WrappedGPT(subset[name])
+                wrapped_layers[name] = SparseGPT(subset[name])
 
             def add_batch(name):
                 def tmp(_, inp, out):
@@ -319,26 +458,14 @@ class T5LayerWandaPruner(LayerWiseBasePruner):
             for name in subset:
                 assert wrapped_layers[name].nsamples == len(inps)
                 print(f"pruning layer {i} name {name}")
-                W_metric = torch.abs(subset[name].weight.data) * torch.sqrt(wrapped_layers[name].scaler_row.reshape((1,-1)))
-
-                setattr(subset[name].weight, "importance_score", W_metric.cpu().abs().mean().item())
                 
-                W_mask = (torch.zeros_like(W_metric) == 1)  ## initialize a mask to be all False
-                if self.prune_n != 0:
-                    # structured n:m sparsity
-                    for ii in range(W_metric.shape[1]):
-                        if ii % self.prune_m == 0:
-                            tmp = W_metric[:,ii:(ii+self.prune_m)].float()
-                            W_mask.scatter_(1,ii+torch.topk(tmp, self.prune_n, dim=1, largest=False)[1], True)
-                else:
-                    sort_res = torch.sort(W_metric, dim=-1, stable=True)
-
-                    # unstructured pruning
-                    sparsity_key = f"{module_to_process}.{i}.{name}.weight"
-                    indices = sort_res[1][:,:int(W_metric.shape[1] * sparsity_ratio[sparsity_key])]
-                    W_mask.scatter_(1, indices, True)
-
-                subset[name].weight.data[W_mask] = 0  ## set weights to zero 
+                sparsity_key = f"{module_to_process}.{i}.{name}.weight"
+                wrapped_layers[name].fasterprune(sparsity_ratio[sparsity_key], prune_n=self.prune_n, prune_m=self.prune_m, percdamp=0.01, blocksize=128)
+                # print(
+                #     sparsity_ratio[sparsity_key], 
+                #     (wrapped_layers[name].layer.weight != 0).float().sum() / wrapped_layers[name].layer.weight.numel
+                # )
+                wrapped_layers[name].free()
 
             for j in range(n_samples):
                 with torch.no_grad():
@@ -435,9 +562,9 @@ class T5LayerWandaPruner(LayerWiseBasePruner):
         return self.model, sparsity_dict
 
 
-@registry.register_pruner("vit_wanda_pruner")
-class VITLayerWandaPruner(LayerWiseBasePruner):
-    pruner_name = "vit_wanda_pruner"
+@registry.register_pruner("vit_sparsegpt_pruner")
+class VITLayerSparseGPTPruner(LayerWiseBasePruner):
+    pruner_name = "vit_sparsegpt_pruner"
     def __init__(
         self,
         model,
@@ -638,7 +765,7 @@ class VITLayerWandaPruner(LayerWiseBasePruner):
 
             wrapped_layers = {}
             for name in subset:
-                wrapped_layers[name] = WrappedGPT(subset[name])
+                wrapped_layers[name] = SparseGPT(subset[name])
 
             def add_batch(name):
                 def tmp(_, inp, out):
@@ -661,30 +788,10 @@ class VITLayerWandaPruner(LayerWiseBasePruner):
             for name in subset:
                 assert wrapped_layers[name].nsamples == len(inps)
                 print(f"pruning layer {i} name {name}")
-                W_metric = torch.abs(subset[name].weight.data) * torch.sqrt(wrapped_layers[name].scaler_row.reshape((1,-1)))
-                
-                setattr(subset[name].weight, "importance_score", W_metric.cpu().abs().mean().item())
-                
-                W_mask = (torch.zeros_like(W_metric) == 1)  ## initialize a mask to be all False
-                if self.prune_n != 0:
-                    # structured n:m sparsity
-                    for ii in range(W_metric.shape[1]):
-                        if ii % self.prune_m == 0:
-                            tmp = W_metric[:,ii:(ii+self.prune_m)].float()
-                            W_mask.scatter_(1,ii+torch.topk(tmp, self.prune_n, dim=1, largest=False)[1], True)
-                else:
-                    # sort_res = torch.sort(W_metric, dim=-1, stable=True)
 
-                    # # unstructured pruning
-                    # indices = sort_res[1][:,:int(W_metric.shape[1]*sparsity_ratio)]
-                    # W_mask.scatter_(1, indices, True)
-                    
-                    sparsity_key = f"{module_to_process}.{i}.{name}.weight"
-                    
-                    thres = torch.sort(W_metric.flatten())[0][int(W_metric.numel() * sparsity_ratio[sparsity_key])]
-                    W_mask = (W_metric <= thres)
-
-                subset[name].weight.data[W_mask] = 0  ## set weights to zero 
+                sparsity_key = f"{module_to_process}.{i}.{name}.weight"
+                wrapped_layers[name].fasterprune(sparsity_ratio[sparsity_key], prune_n=self.prune_n, prune_m=self.prune_m, percdamp=0.01, blocksize=128)
+                wrapped_layers[name].free()
 
             for j in range(n_samples):
                 with torch.no_grad():
@@ -784,9 +891,9 @@ class VITLayerWandaPruner(LayerWiseBasePruner):
         return self.model, sparsity_dict
 
 
-@registry.register_pruner("blipt5_wanda_pruner")
-class BLIPT5LayerWandaPruner(LayerWiseBasePruner):
-    pruner_name = "blipt5_wanda_pruner"
+@registry.register_pruner("blipt5_sparsegpt_pruner")
+class BLIPT5LayerSparseGPTPruner(LayerWiseBasePruner):
+    pruner_name = "blipt5_sparsegpt_pruner"
     def __init__(
         self,
         model,
@@ -870,7 +977,7 @@ class BLIPT5LayerWandaPruner(LayerWiseBasePruner):
             import yaml
             with open(self.sparsity_dict, "r") as f:
                 return yaml.load(f, Loader=yaml.FullLoader)
-
+        
         if sparsity_ratio_granularity == None:
             layer_to_group_mapping = {}
         
@@ -1023,7 +1130,7 @@ class BLIPT5LayerWandaPruner(LayerWiseBasePruner):
 
     #         wrapped_layers = {}
     #         for name in subset:
-    #             wrapped_layers[name] = WrappedGPT(subset[name])
+    #             wrapped_layers[name] = SparseGPT(subset[name])
 
     #         def add_batch(name):
     #             def tmp(_, inp, out):
@@ -1133,7 +1240,7 @@ class BLIPT5LayerWandaPruner(LayerWiseBasePruner):
 
     #         wrapped_layers = {}
     #         for name in subset:
-    #             wrapped_layers[name] = WrappedGPT(subset[name])
+    #             wrapped_layers[name] = SparseGPT(subset[name])
 
     #         def add_batch(name):
     #             def tmp(_, inp, out):
@@ -1219,9 +1326,9 @@ class BLIPT5LayerWandaPruner(LayerWiseBasePruner):
             #     n_samples=self.num_samples, sparsity_ratio=sparsity_ratio,
             # )
             
-            _vit_prune = partial(VITLayerWandaPruner._prune, self)
+            _vit_prune = partial(VITLayerSparseGPTPruner._prune, self)
             self.prepare_calibration_input_encoder = partial(
-                VITLayerWandaPruner.prepare_calibration_input_encoder,
+                VITLayerSparseGPTPruner.prepare_calibration_input_encoder,
                 self,
                 )
             
@@ -1245,9 +1352,9 @@ class BLIPT5LayerWandaPruner(LayerWiseBasePruner):
                     sparsity_ratio_granularity=None
                 )
             
-            _t5_prune = partial(T5LayerWandaPruner._prune, self)
+            _t5_prune = partial(T5LayerSparseGPTPruner._prune, self)
             self.prepare_calibration_input_encoder = partial(
-                T5LayerWandaPruner.prepare_calibration_input_encoder,
+                T5LayerSparseGPTPruner.prepare_calibration_input_encoder,
                 self,
                 )
             

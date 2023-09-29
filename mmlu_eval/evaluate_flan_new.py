@@ -116,6 +116,8 @@ def main(args):
         print("Load pruned weight")
         prune_state_dict = torch.load(args.pruned_checkpoint, map_location="cpu")
         
+        prune_state_dict = {k: v for k, v in prune_state_dict.items() if k.startswith("t5_model.")}
+        
         prune_state_dict = {k.replace("t5_model.", ""): v for k, v in prune_state_dict.items()}
         model.load_state_dict(prune_state_dict)
 

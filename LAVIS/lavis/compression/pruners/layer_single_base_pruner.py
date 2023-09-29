@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import numpy as np
 
 from time import time
 from copy import deepcopy
@@ -34,7 +35,10 @@ class LayerWiseBasePruner(BasePruner):
         model_prefix="t5_model",
         sparsity_ratio_granularity=None,
         max_sparsity_per_layer=0.8,
-        score_method="obd",
+        score_method="obd_avg",
+        num_data_first_stage=128,
+        num_noise=1,
+        sparsity_dict=None,
         **kwargs,
     ):
         super().__init__(
@@ -50,6 +54,9 @@ class LayerWiseBasePruner(BasePruner):
         self.sparsity_ratio_granularity = sparsity_ratio_granularity
         self.max_sparsity_per_layer = max_sparsity_per_layer
         self.score_method = score_method
+        self.num_data_first_stage = num_data_first_stage
+        self.num_noise = num_noise
+        self.sparsity_dict = sparsity_dict
 
         self.prune_spec = prune_spec
         self.model_prefix = model_prefix
@@ -112,7 +119,7 @@ class LayerWiseBasePruner(BasePruner):
 
 
 class LayerSparsity:
-    def __init__(self, model, data_loader, loss_func, num_samples, original_sparsity, max_sparsity_per_layer=0.8, score_method="obd", layer_to_group_mapping={}):
+    def __init__(self, model, data_loader, loss_func, num_samples, original_sparsity, max_sparsity_per_layer=0.8, score_method="obd_avg", num_noise=1, layer_to_group_mapping={}):
         self.importance_measure = {}
         self.model = model
         self.data_loader = data_loader
@@ -121,17 +128,131 @@ class LayerSparsity:
         self.original_sparsity = original_sparsity
         self.layer_to_group_mapping = layer_to_group_mapping
         self.max_sparsity_per_layer = max_sparsity_per_layer
+        self.num_noise = num_noise
         
         self.score_method = score_method
         
-        self.score_compute, self.score_aggregate = score_method.split("_")
+        if score_method is not None:
+            self.score_compute, self.score_aggregate = score_method.split("_")
         
         assert self.max_sparsity_per_layer >= self.original_sparsity
+        
+    def get_mask(self, importance_scores, p, max_sparsity_per_layer):
+        # Set top (1 - max_sparsity)% of parameters to be very large value to avoid 
+        # them being pruned
+        
+        for k, v in importance_scores.items():
+            num_to_set = int(importance_scores[k].numel() * (1 - max_sparsity_per_layer))
+            
+            if num_to_set > 0:
+                threshold, _ = torch.topk(importance_scores[k].flatten(), num_to_set, largest=True)
+                threshold = threshold[-1] # take the last value
+
+                importance_scores[k][torch.where(v >= threshold)] = torch.finfo(v.dtype).max
+        
+        # Flatten all tensors and concatenate them
+        all_scores = torch.cat([t.flatten() for t in importance_scores.values()])
+        
+        # Sort and find the threshold
+        num_to_zero_out = int(p * all_scores.numel())
+        threshold, _ = torch.topk(all_scores, num_to_zero_out, largest=False)
+        threshold = threshold[-1]
+        
+        # Create mask based on threshold
+        masks = {}
+        for k, v in importance_scores.items():
+            masks[k] = (v > threshold).type(v.dtype)
+        
+        return masks
+    
+    def get_layerwise_mask(self, importance_scores, p):
+        # Set top (1 - max_sparsity)% of parameters to be very large value to avoid 
+        # them being pruned
+        
+        masks = {}
+        for k, v in importance_scores.items():
+            all_scores = importance_scores[k].flatten().cuda()
+            num_to_zero_out = int(p * all_scores.numel())
+            threshold, _ = torch.topk(all_scores, num_to_zero_out, largest=False)
+            threshold = threshold[-1].cpu()
+
+            masks[k] = (v > threshold).type(v.dtype)
+
+        return masks
+        
+    def global_iterative_pruning(self, target_sparsity, dict_layers_to_prune, iteratation=1, max_sparsity_per_layer=1.0):
+        
+        weight_copy = {}
+        total_parameters = 0
+        names = []
+        params = []
+        for k, v in self.model.named_parameters():  
+            if k in dict_layers_to_prune:
+                names.append(k)
+                params.append(v)
+                weight_copy[k] = torch.clone(v).cpu()
+
+        masks = None
+        for i in range(1, iteratation+1):
+            p_i = target_sparsity ** (iteratation / i) # Compute modified sparsity for the i^th iteration
+            
+            importance_measure = self.compute_importance_scores(
+                dict_layers_to_prune
+            )
+            
+            importance_measure = {k: v for k, v in importance_measure.items() if k in dict_layers_to_prune}
+            
+            if masks is not None:
+                # Apply mask to importance scores (this step is to simulate pruning in iterations)
+                for k in importance_measure:
+                    importance_measure[k] *= masks[k]
+
+            # if self.is_global and not self.prune_per_model:
+                # total global
+            print("global")
+            masks = self.get_mask(importance_measure, p_i, max_sparsity_per_layer)
+            # elif self.is_global and self.prune_per_model:
+            #     print("model-level global")
+            #     vision_scores = {k: v for k, v in importance_measure.items() if k.startswith(self.vit_model_prefix)}
+            #     language_scores = {k: v for k, v in importance_measure.items() if k.startswith(self.t5_model_prefix)}
+            #     vision_masks = self.get_mask(vision_scores, p_i, max_sparsity_per_layer)
+            #     language_masks = self.get_mask(language_scores, p_i, max_sparsity_per_layer)
+                
+            #     vision_masks.update(language_masks)
+                
+            #     masks = vision_masks
+            # else:
+            #     print("layer-wise")
+            #     masks = self.get_layerwise_mask(importance_measure, p_i)
+            
+            # prune the model
+            for k, v in self.model.named_parameters():
+                if k in masks:
+                    v.data *= masks[k].type(v.dtype).to(v.device)
+                    
+            print(f"Step {i}, target sparsity: {p_i:.4f}")
+        
+        sparsity_dict = {}
+        for k, v in self.model.named_parameters():
+            sparsity_dict[k] = ((v == 0).float().sum() / v.numel()).item()
+            
+        for k, p in zip(names, params):
+            # use current_batch_index rather than self.num_samples because sometimes
+            # the batch size might not be 1, and the loss is already normalized by 
+            # batch size, now when only have to normalize it by num_batches now
+            p.data = weight_copy[k].to(p.device)
+        
+        return sparsity_dict
     
     @print_time
     def return_sparsity(self):
         original_sparsity = self.original_sparsity
         layer_to_group_mapping = self.layer_to_group_mapping
+        
+        if self.score_compute.startswith("real"):
+            return self.global_iterative_pruning(
+                original_sparsity, layer_to_group_mapping, iteratation=3, max_sparsity_per_layer=1.0
+            )
 
         if layer_to_group_mapping is None or len(layer_to_group_mapping) == 0:
             class uniform_sparsity_module:
@@ -141,8 +262,15 @@ class LayerSparsity:
 
         # compute the global information
         if len(self.importance_measure) == 0:
-            self.importance_measure = self.compute_importance_scores()
-        
+            if self.score_compute.startswith("mezo"):
+                self.importance_measure = self.compute_importance_scores_mezo_diff(layer_to_group_mapping)
+            elif self.score_compute.startswith("lmezo"):
+                self.importance_measure = self.compute_importance_scores_mezo_layer(layer_to_group_mapping)
+            elif self.score_compute.startswith("olmezo"):
+                self.importance_measure = self.compute_importance_scores_mezo_layer_one(layer_to_group_mapping)
+            else:
+                self.importance_measure = self.compute_importance_scores(layer_to_group_mapping)
+
         # create the layer list that for each group
         group_to_layer_mapping = {}
         for k, v in layer_to_group_mapping.items():
@@ -319,7 +447,7 @@ class LayerSparsity:
         return layer_sparsity
 
     @print_time
-    def compute_importance_scores(self):
+    def compute_importance_scores(self, layer_to_group_mapping):
         model = self.model
         data_loader = self.data_loader
         loss_func = self.loss_func
@@ -327,9 +455,10 @@ class LayerSparsity:
         names = []
         params = []
         for k, v in model.named_parameters():
-            names.append(k)
-            params.append(v)
-        
+            if k in layer_to_group_mapping:
+                names.append(k)
+                params.append(v)
+            
         gradients_dict = {k: 0 for k in names}
         
         device = next(iter(model.parameters())).device
@@ -352,7 +481,11 @@ class LayerSparsity:
             assert len(grads) == len(names) == len(params)
 
             for k, v in zip(names, grads):
-                gradients_dict[k] = v.cpu().data.float()
+                
+                if self.score_compute == "obd":
+                    gradients_dict[k] += v.cpu().data.float() ** 2
+                else:
+                    gradients_dict[k] += v.cpu().data.float().abs()
 
         for k in names:
             # use current_batch_index rather than self.num_samples because sometimes
@@ -360,12 +493,294 @@ class LayerSparsity:
             # batch size, now when only have to normalize it by num_batches now
             gradients_dict[k] /= current_batch_index
         
-        if self.score_compute == "obd":
+        if "obd" in self.score_compute:
             # using square of magnitude multiplied by diagonal fisher as importance scores
-            importance_measure = {k: (v.cpu().data.float() ** 2) * gradients_dict[k] ** 2 for k, v in self.model.named_parameters()}
-        elif self.score_compute == "aobd":
-            importance_measure = {k: (v.cpu().data.float().abs()) * gradients_dict[k].abs() for k, v in self.model.named_parameters()}
-        elif self.score_compute == "gradient":
-            importance_measure = {k: gradients_dict[k].abs() for k, v in self.model.named_parameters()}
+            importance_measure = {k: (v.cpu().data.float() ** 2) * gradients_dict[k] for k, v in zip(names, params)}
+        elif "aobd" in self.score_compute:
+            importance_measure = {k: (v.cpu().data.float().abs()) * gradients_dict[k].abs() for k, v in zip(names, params)}
+        elif "gradient" in self.score_compute:
+            importance_measure = {k: gradients_dict[k].abs() for k, v in zip(names, params)}
         
+        return importance_measure
+    
+    def zo_perturb_parameters(self, params, random_seed=1, scaling_factor=1, zo_eps=1e-3):
+        """
+        Perturb the parameters with random vector z.
+        Input: 
+        - random_seed: random seed for MeZO in-place perturbation (if it's None, we will use self.zo_random_seed)
+        - scaling_factor: theta = theta + scaling_factor * z * eps
+        """
+
+        # Set the random seed to ensure that we sample the same z for perturbation/update
+        torch.manual_seed(random_seed)
+        
+        for param in params:
+            z = torch.normal(mean=0, std=1, size=param.data.size(), device=param.data.device, dtype=param.data.dtype)
+            param.data = param.data + scaling_factor * z * zo_eps
+    
+    def compute_importance_scores_mezo_diff(self, layer_to_group_mapping):
+        model = self.model
+        data_loader = self.data_loader
+        loss_func = self.loss_func
+        
+        model.eval()
+
+        names = []
+        params = []
+        weight_copy = {}
+        total_parameters = 0
+        for k, v in model.named_parameters():  
+            if k in layer_to_group_mapping:
+                names.append(k)
+                params.append(v)
+                weight_copy[k] = torch.clone(v).cpu()
+                total_parameters += v.numel()
+                
+        gradients_dict = {k: 0 for k in names}
+        
+        device = next(iter(model.parameters())).device
+
+        accum_samples = 0
+        current_batch_index = 0
+        
+        zo_eps = 1e-3
+        
+        learning_rate = 1 / total_parameters * 1e-3
+        
+        for d in data_loader:
+            
+            if accum_samples >= self.num_samples:
+                break
+            
+            print(accum_samples)
+            if accum_samples >= self.num_samples:
+                break
+            
+            zo_random_seed = np.random.randint(1000000000)
+            
+            self.zo_perturb_parameters(params, random_seed=zo_random_seed, scaling_factor=1, zo_eps=zo_eps)
+            with torch.no_grad():
+                loss1, batch_len = loss_func(model, d, device != "cpu")
+            
+            self.zo_perturb_parameters(params, random_seed=zo_random_seed, scaling_factor=-2, zo_eps=zo_eps)
+            with torch.no_grad():
+                loss2, batch_len = loss_func(model, d, device != "cpu")
+        
+            # recover the weight
+            self.zo_perturb_parameters(params, random_seed=zo_random_seed, scaling_factor=1, zo_eps=zo_eps)
+
+            accum_samples += batch_len
+            current_batch_index += 1
+            
+            projected_grad = ((loss1 - loss2) / (2 * zo_eps)).item()
+            
+            # gradients_dict = self.zo_gradients(gradients_dict, names, params, projected_grad, random_seed=zo_random_seed)
+            
+            torch.manual_seed(zo_random_seed)
+            for k, param in zip(names, params):
+                z = torch.normal(mean=0, std=1, size=param.data.size(), device=param.data.device, dtype=param.data.dtype)
+                param.data = param.data - projected_grad * z * learning_rate
+
+        for k, p in zip(names, params):
+            # use current_batch_index rather than self.num_samples because sometimes
+            # the batch size might not be 1, and the loss is already normalized by 
+            # batch size, now when only have to normalize it by num_batches now
+            gradients_dict[k] = (p.data.cpu() - weight_copy[k]).float().abs() / current_batch_index
+            
+            p.data = weight_copy[k].to(p.device)
+            
+            del weight_copy[k]
+            
+        # using square of magnitude multiplied by diagonal fisher as importance scores
+        # importance_measure = {k: (v.cpu().data.float() ** 2) * gradients_dict[k] ** 2 for k, v in self.model.named_parameters()}
+
+        if self.score_compute == "mezo-gradient":
+            importance_measure = {k: gradients_dict[k].abs() for k, v in zip(names, params)}
+        elif self.score_compute == "mezo-aobd":
+            importance_measure = {k: v.cpu().data.float().abs() * gradients_dict[k].abs() for k, v in zip(names, params)}
+        elif self.score_compute == "mezo-obd":
+            importance_measure = {k: v.cpu().data.float() ** 2 * gradients_dict[k] ** 2 for k, v in zip(names, params)}
+            
+        return importance_measure
+    
+    def compute_importance_scores_mezo_layer(self, layer_to_group_mapping):
+        model = self.model
+        data_loader = self.data_loader
+        loss_func = self.loss_func
+        
+        names = []
+        params = []
+        model.eval()
+        for k, v in model.named_parameters():  
+            if k in layer_to_group_mapping:
+                names.append(k)
+                params.append(v)
+        
+        gradients_dict = {k: 0 for k in names}
+        
+        device = next(iter(model.parameters())).device
+
+        accum_samples = 0
+        current_batch_index = 0
+        
+        zo_eps = 1e-3
+        
+        n_mezo = 4
+        
+        self.num_samples = 8
+        
+        for i, (name, param) in enumerate(zip(names, params)):
+            print(i, name)
+            accum_samples = 0
+            current_batch_index = 0
+            
+            for d in data_loader:
+                if accum_samples >= self.num_samples:
+                    break
+                
+                per_gradients_dict = {name: 0}
+                
+                for _ in range(n_mezo):
+                    
+                    if accum_samples >= self.num_samples:
+                        break
+                    
+                    zo_random_seed = np.random.randint(1000000000)
+                    
+                    self.zo_perturb_parameters([param], random_seed=zo_random_seed, scaling_factor=1, zo_eps=zo_eps)
+                    with torch.no_grad():
+                        loss1, batch_len = loss_func(model, d, device != "cpu")
+                    
+                    self.zo_perturb_parameters([param], random_seed=zo_random_seed, scaling_factor=-2, zo_eps=zo_eps)
+                    with torch.no_grad():
+                        loss2, batch_len = loss_func(model, d, device != "cpu")
+                
+                    # recover the weight
+                    self.zo_perturb_parameters([param], random_seed=zo_random_seed, scaling_factor=1, zo_eps=zo_eps)
+
+                    accum_samples += batch_len
+                    current_batch_index += 1
+                    
+                    projected_grad = ((loss1 - loss2) / (2 * zo_eps)).item()
+                    
+                    # print(zo_random_seed, loss1, loss2, projected_grad)
+
+                    # gradients_dict = self.zo_gradients(gradients_dict, names, params, projected_grad, random_seed=zo_random_seed)
+                    
+                    torch.manual_seed(zo_random_seed)
+                    per_gradients_dict[name] += projected_grad
+                        
+                gradients_dict[name] += torch.FloatTensor([per_gradients_dict[name]]).abs()
+                
+        print(gradients_dict)
+    
+        # for k in names:
+        #     # use current_batch_index rather than self.num_samples because sometimes
+        #     # the batch size might not be 1, and the loss is already normalized by 
+        #     # batch size, now when only have to normalize it by num_batches now
+        #     importance = torch.full(
+        #         params[k], gradients_dict[k], dtype=torch.float32, device="cpu"
+        #     )
+        #     gradients_dict[k] = importance
+            
+        # using square of magnitude multiplied by diagonal fisher as importance scores
+        # importance_measure = {k: (v.cpu().data.float() ** 2) * gradients_dict[k] ** 2 for k, v in self.model.named_parameters()}
+
+        if self.score_compute == "lmezo-gradient":
+            importance_measure = {k: gradients_dict[k].abs() for k, v in zip(names, params)}
+        elif self.score_compute == "lmezo-aobd":
+            importance_measure = {k: v.cpu().data.float().abs() * gradients_dict[k].abs() for k, v in zip(names, params)}
+        elif self.score_compute == "lmezo-obd":
+            importance_measure = {k: v.cpu().data.float() ** 2 * gradients_dict[k] ** 2 for k, v in zip(names, params)}
+            
+        return importance_measure
+    
+    def compute_importance_scores_mezo_layer_one(self, layer_to_group_mapping):
+        model = self.model
+        data_loader = self.data_loader
+        loss_func = self.loss_func
+        
+        names = []
+        params = []
+        model.eval()
+        for k, v in model.named_parameters():  
+            if k in layer_to_group_mapping:
+                names.append(k)
+                params.append(v)
+        
+        gradients_dict = {k: 0 for k in names}
+        
+        device = next(iter(model.parameters())).device
+
+        accum_samples = 0
+        current_batch_index = 0
+        
+        zo_eps = 1e-3
+        
+        n_mezo = self.num_noise
+        
+        for i, (name, param) in enumerate(zip(names, params)):
+            print(i, name)
+            accum_samples = 0
+            current_batch_index = 0
+            
+            for d in data_loader:
+                if accum_samples >= self.num_samples:
+                    break
+                
+                per_gradients_dict = {name: 0}
+                
+                for _ in range(n_mezo):
+                    
+                    if accum_samples >= self.num_samples:
+                        break
+                    
+                    zo_random_seed = np.random.randint(1000000000)
+                    
+                    self.zo_perturb_parameters([param], random_seed=zo_random_seed, scaling_factor=1, zo_eps=zo_eps)
+                    with torch.no_grad():
+                        loss1, batch_len = loss_func(model, d, device != "cpu")
+                    
+                    self.zo_perturb_parameters([param], random_seed=zo_random_seed, scaling_factor=-2, zo_eps=zo_eps)
+                    with torch.no_grad():
+                        loss2, batch_len = loss_func(model, d, device != "cpu")
+                
+                    # recover the weight
+                    self.zo_perturb_parameters([param], random_seed=zo_random_seed, scaling_factor=1, zo_eps=zo_eps)
+
+                    accum_samples += batch_len
+                    current_batch_index += 1
+                    
+                    projected_grad = ((loss1 - loss2) / (2 * zo_eps)).item()
+                    
+                    # print(zo_random_seed, loss1, loss2, projected_grad)
+
+                    # gradients_dict = self.zo_gradients(gradients_dict, names, params, projected_grad, random_seed=zo_random_seed)
+                    
+                    torch.manual_seed(zo_random_seed)
+                    per_gradients_dict[name] += abs(projected_grad)
+                        
+                gradients_dict[name] += torch.FloatTensor([per_gradients_dict[name]]).abs()
+                
+        print(gradients_dict)
+    
+        # for k in names:
+        #     # use current_batch_index rather than self.num_samples because sometimes
+        #     # the batch size might not be 1, and the loss is already normalized by 
+        #     # batch size, now when only have to normalize it by num_batches now
+        #     importance = torch.full(
+        #         params[k], gradients_dict[k], dtype=torch.float32, device="cpu"
+        #     )
+        #     gradients_dict[k] = importance
+            
+        # using square of magnitude multiplied by diagonal fisher as importance scores
+        # importance_measure = {k: (v.cpu().data.float() ** 2) * gradients_dict[k] ** 2 for k, v in self.model.named_parameters()}
+
+        if self.score_compute == "olmezo-gradient":
+            importance_measure = {k: gradients_dict[k].abs() for k, v in zip(names, params)}
+        elif self.score_compute == "olmezo-aobd":
+            importance_measure = {k: v.cpu().data.float().abs() * gradients_dict[k].abs() for k, v in zip(names, params)}
+        elif self.score_compute == "olmezo-obd":
+            importance_measure = {k: v.cpu().data.float() ** 2 * gradients_dict[k] ** 2 for k, v in zip(names, params)}
+            
         return importance_measure

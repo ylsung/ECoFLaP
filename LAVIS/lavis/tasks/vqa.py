@@ -235,6 +235,9 @@ class GQATask(VQATask):
 
         accuracy = sum(acc) / len(acc) * 100
         metrics = {"agg_metrics": accuracy, "acc": accuracy}
+        
+        metrics["orig_size"] = f"{self.orig_total_size / 10 ** 9:.3f} B"
+        metrics["dist_size"] = f"{self.distilled_total_size / 10 ** 9:.3f} B"
 
         with open(
             os.path.join(registry.get_path("output_dir"), "evaluate.txt"), "a"
@@ -298,6 +301,9 @@ class AOKVQATask(VQATask):
 
         accuracy = sum(acc) / len(acc) * 100
         metrics = {"agg_metrics": accuracy, "acc": accuracy}
+        
+        metrics["orig_size"] = f"{self.orig_total_size / 10 ** 9:.3f} B"
+        metrics["dist_size"] = f"{self.distilled_total_size / 10 ** 9:.3f} B"
 
         with open(
             os.path.join(registry.get_path("output_dir"), "evaluate.txt"), "a"

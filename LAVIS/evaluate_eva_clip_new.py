@@ -222,6 +222,36 @@ def parse_args():
         default="obd_avg",
     )
     
+    parser.add_argument(
+        "--num_data_first_stage", type=int, default=32
+    )
+    
+    parser.add_argument(
+        "--num_noise", default=1, type=int,
+    )
+    
+    parser.add_argument(
+        "--sparsity_dict",
+        type=str,
+        default=None,
+    )
+    
+    parser.add_argument(
+        "--prune_per_model",
+        action="store_true"
+    )
+    
+    parser.add_argument(
+        "--iteration",
+        type=int,
+        default=1,
+    )
+    
+    parser.add_argument(
+        "--is_global",
+        action="store_true"
+    )
+    
     args = parser.parse_args()
     # if 'LOCAL_RANK' not in os.environ:
     #     os.environ['LOCAL_RANK'] = str(args.local_rank)
@@ -306,7 +336,21 @@ def main():
         print("Load vit pruned weight")
         prune_state_dict = torch.load(args.vit_pruned_checkpoint, map_location="cpu")
         
-        prune_state_dict = {k.replace("visual.", ""): v for k, v in prune_state_dict.items()}
+        model_prefix = None
+        for candidate_prefix in ["visual.", "visual_encoder."]:
+            if any(k.startswith(candidate_prefix) for k in prune_state_dict.keys()):
+                model_prefix = candidate_prefix
+                break
+            
+        assert model_prefix is not None
+        
+        prune_state_dict = {k: v for k, v in prune_state_dict.items() if k.startswith(model_prefix)}
+        
+        print(f"VIT checkpoint prefix: {model_prefix}")
+        
+        prune_state_dict = {k.replace(model_prefix, ""): v for k, v in prune_state_dict.items()}
+        
+        # prune_state_dict = {k.replace("visual.", ""): v for k, v in prune_state_dict.items()}
         original_checkpoints = model.visual.state_dict()
         original_checkpoints.update(prune_state_dict)
         prune_state_dict = original_checkpoints
@@ -323,11 +367,16 @@ def main():
             "importance_scores_cache": None,
             "keep_indices_cache": None,
             "is_strct_pruning": False,
-            "is_global": False,
+            "is_global": args.is_global,
             "num_samples": args.num_data,
             "sparsity_ratio_granularity": args.sparsity_ratio_granularity,
             "max_sparsity_per_layer": args.max_sparsity_per_layer,
             "score_method": args.score_method,
+            "num_data_first_stage": args.num_data_first_stage,
+            "num_noise": args.num_noise,
+            "sparsity_dict": args.sparsity_dict,
+            "prune_per_model": args.prune_per_model,
+            "iteration": args.iteration,
         }
 
         # set up the classifier

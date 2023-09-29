@@ -244,6 +244,36 @@ def parse_args():
         default="obd_avg",
     )
     
+    parser.add_argument(
+        "--num_data_first_stage", type=int, default=32
+    )
+    
+    parser.add_argument(
+        "--num_noise", default=1, type=int,
+    )
+    
+    parser.add_argument(
+        "--sparsity_dict",
+        type=str,
+        default=None,
+    )
+    
+    parser.add_argument(
+        "--prune_per_model",
+        action="store_true"
+    )
+    
+    parser.add_argument(
+        "--is_global",
+        action="store_true"
+    )
+    
+    parser.add_argument(
+        "--iteration",
+        type=int,
+        default=1,
+    )
+    
     args = parser.parse_args()
     # if 'LOCAL_RANK' not in os.environ:
     #     os.environ['LOCAL_RANK'] = str(args.local_rank)
@@ -309,7 +339,7 @@ def main():
         param.numel() for param in model.parameters()
     )
     
-    if args.t5_pruned_checkpoint is not None:
+    if args.t5_pruned_checkpoint is not None and getattr(model, "t5_model", None) is not None:
         print("Load t5 pruned weight")
         prune_state_dict = torch.load(args.t5_pruned_checkpoint, map_location="cpu")
         
@@ -348,6 +378,9 @@ def main():
                 
         prune_state_dict = original_state_dict
         
+        from lavis.models.eva_vit import interpolate_pos_embed
+        
+        interpolate_pos_embed(model.visual_encoder, prune_state_dict)
         # for additional_key in additional_keys:
         #     del prune_state_dict[additional_key]
 
@@ -366,11 +399,16 @@ def main():
         "importance_scores_cache": None,
         "keep_indices_cache": None,
         "is_strct_pruning": False,
-        "is_global": False,
+        "is_global": args.is_global,
         "num_samples": args.num_data,
         "sparsity_ratio_granularity": args.sparsity_ratio_granularity,
         "max_sparsity_per_layer": args.max_sparsity_per_layer,
         "score_method": args.score_method,
+        "num_data_first_stage": args.num_data_first_stage,
+        "num_noise": args.num_noise,
+        "sparsity_dict": args.sparsity_dict,
+        "prune_per_model": args.prune_per_model,
+        "iteration": args.iteration,
     }
     
     pruner = load_pruner(
@@ -378,6 +416,8 @@ def main():
         data_loader, 
         cfg=config
     )
+    
+    start = time.time()
     model, sparsity_dict = pruner.prune()
 
     # model, _ = pruner.prune()
@@ -407,7 +447,34 @@ def main():
             import yaml
             with open(os.path.join(saved_folder, job_id + ".yaml"), "w") as f:
                 yaml.dump(sparsity_dict, f)
+                
+        
+        peak_memory = (torch.cuda.max_memory_allocated() / 1024 ** 2)/1000
+        
+        processing_time = time.time() - start
+        
+        training_dict = {
+            "memory": peak_memory,
+            "time": processing_time
+        }
+        
+        saved_folder = "training_statistics"
+        os.makedirs(saved_folder, exist_ok=True)
+        
+        import yaml
+        with open(os.path.join(saved_folder, job_id + ".yaml"), "w") as f:
+            yaml.dump(training_dict, f)
+            
+        
+        saved_folder = "importance_scores"
+        os.makedirs(saved_folder, exist_ok=True)
+        
+        torch.save(
+            {k: v.importance_score for k, v in model.named_parameters() if getattr(v, "importance_score", None) is not None}, 
+            os.path.join(saved_folder, job_id + ".pth")
+        )
 
+        
         exit()
 
     runner = RunnerBase(
