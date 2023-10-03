@@ -109,6 +109,7 @@ class T5LayerWandaPruner(LayerWiseBasePruner):
         num_data_first_stage=128,
         num_noise=1,
         sparsity_dict=None,
+        noise_eps=1e-3,
         **kwargs,
     ):
         super().__init__(
@@ -127,6 +128,7 @@ class T5LayerWandaPruner(LayerWiseBasePruner):
             num_data_first_stage=num_data_first_stage,
             num_noise=num_noise,
             sparsity_dict=sparsity_dict,
+            noise_eps=noise_eps,
         )
         self.pruning_func = t5_strct_pruning if self.is_strct_pruning else t5_unstrct_pruning
         
@@ -394,6 +396,7 @@ class T5LayerWandaPruner(LayerWiseBasePruner):
             self.max_sparsity_per_layer,
             self.score_method,
             self.num_noise,
+            self.noise_eps,
             layer_to_group_mapping,
         )
         
@@ -455,6 +458,7 @@ class VITLayerWandaPruner(LayerWiseBasePruner):
         num_data_first_stage=128,
         num_noise=1,
         sparsity_dict=None,
+        noise_eps=1e-3,
         **kwargs,
     ):
         super().__init__(
@@ -473,6 +477,7 @@ class VITLayerWandaPruner(LayerWiseBasePruner):
             num_data_first_stage=num_data_first_stage,
             num_noise=num_noise,
             sparsity_dict=sparsity_dict,
+            noise_eps=noise_eps,
         )
         self.pruning_func = vit_strct_pruning if self.is_strct_pruning else vit_unstrct_pruning
         
@@ -749,6 +754,7 @@ class VITLayerWandaPruner(LayerWiseBasePruner):
             self.max_sparsity_per_layer,
             self.score_method,
             self.num_noise,
+            self.noise_eps,
             layer_to_group_mapping,
         )
         
@@ -812,6 +818,7 @@ class BLIPT5LayerWandaPruner(LayerWiseBasePruner):
         num_data_first_stage=128,
         num_noise=1,
         sparsity_dict=None,
+        noise_eps=1e-3,
         **kwargs,
     ):
         super().__init__(
@@ -830,6 +837,7 @@ class BLIPT5LayerWandaPruner(LayerWiseBasePruner):
             num_data_first_stage=num_data_first_stage,
             num_noise=num_noise,
             sparsity_dict=sparsity_dict,
+            noise_eps=noise_eps,
         )
         
         self.t5_prune_spec = t5_prune_spec
@@ -931,6 +939,7 @@ class BLIPT5LayerWandaPruner(LayerWiseBasePruner):
             self.max_sparsity_per_layer,
             self.score_method,
             self.num_noise,
+            self.noise_eps,
             layer_to_group_mapping,
         )
         

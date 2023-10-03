@@ -39,6 +39,7 @@ class LayerWiseBasePruner(BasePruner):
         num_data_first_stage=128,
         num_noise=1,
         sparsity_dict=None,
+        noise_eps=1e-3,
         **kwargs,
     ):
         super().__init__(
@@ -57,6 +58,7 @@ class LayerWiseBasePruner(BasePruner):
         self.num_data_first_stage = num_data_first_stage
         self.num_noise = num_noise
         self.sparsity_dict = sparsity_dict
+        self.noise_eps = noise_eps
 
         self.prune_spec = prune_spec
         self.model_prefix = model_prefix
@@ -119,7 +121,7 @@ class LayerWiseBasePruner(BasePruner):
 
 
 class LayerSparsity:
-    def __init__(self, model, data_loader, loss_func, num_samples, original_sparsity, max_sparsity_per_layer=0.8, score_method="obd_avg", num_noise=1, layer_to_group_mapping={}):
+    def __init__(self, model, data_loader, loss_func, num_samples, original_sparsity, max_sparsity_per_layer=0.8, score_method="obd_avg", num_noise=1, noise_eps=1e-3, layer_to_group_mapping={}):
         self.importance_measure = {}
         self.model = model
         self.data_loader = data_loader
@@ -129,6 +131,7 @@ class LayerSparsity:
         self.layer_to_group_mapping = layer_to_group_mapping
         self.max_sparsity_per_layer = max_sparsity_per_layer
         self.num_noise = num_noise
+        self.noise_eps = noise_eps
         
         self.score_method = score_method
         
@@ -543,7 +546,7 @@ class LayerSparsity:
         accum_samples = 0
         current_batch_index = 0
         
-        zo_eps = 1e-3
+        zo_eps = self.noise_eps
         
         learning_rate = 1 / total_parameters * 1e-3
         
@@ -623,7 +626,7 @@ class LayerSparsity:
         accum_samples = 0
         current_batch_index = 0
         
-        zo_eps = 1e-3
+        zo_eps = self.noise_eps
         
         n_mezo = 4
         
@@ -715,7 +718,7 @@ class LayerSparsity:
         accum_samples = 0
         current_batch_index = 0
         
-        zo_eps = 1e-3
+        zo_eps = self.noise_eps
         
         n_mezo = self.num_noise
         

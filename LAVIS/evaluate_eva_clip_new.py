@@ -231,6 +231,10 @@ def parse_args():
     )
     
     parser.add_argument(
+        "--noise_eps", default=1e-3, type=float,
+    )
+    
+    parser.add_argument(
         "--sparsity_dict",
         type=str,
         default=None,
@@ -374,6 +378,7 @@ def main():
             "score_method": args.score_method,
             "num_data_first_stage": args.num_data_first_stage,
             "num_noise": args.num_noise,
+            "noise_eps": args.noise_eps,
             "sparsity_dict": args.sparsity_dict,
             "prune_per_model": args.prune_per_model,
             "iteration": args.iteration,
