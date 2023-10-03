@@ -423,6 +423,7 @@ def main():
     )
     
     start = time.time()
+    
     model, sparsity_dict = pruner.prune()
 
     # model, _ = pruner.prune()
@@ -453,7 +454,6 @@ def main():
             with open(os.path.join(saved_folder, job_id + ".yaml"), "w") as f:
                 yaml.dump(sparsity_dict, f)
                 
-        
         peak_memory = (torch.cuda.max_memory_allocated() / 1024 ** 2)/1000
         
         processing_time = time.time() - start
@@ -469,17 +469,15 @@ def main():
         import yaml
         with open(os.path.join(saved_folder, job_id + ".yaml"), "w") as f:
             yaml.dump(training_dict, f)
-            
+             
+        # saved_folder = "importance_scores"
+        # os.makedirs(saved_folder, exist_ok=True)
         
-        saved_folder = "importance_scores"
-        os.makedirs(saved_folder, exist_ok=True)
-        
-        torch.save(
-            {k: v.importance_score for k, v in model.named_parameters() if getattr(v, "importance_score", None) is not None}, 
-            os.path.join(saved_folder, job_id + ".pth")
-        )
+        # torch.save(
+        #     {k: v.importance_score for k, v in model.named_parameters() if getattr(v, "importance_score", None) is not None}, 
+        #     os.path.join(saved_folder, job_id + ".pth")
+        # )
 
-        
         exit()
 
     runner = RunnerBase(
