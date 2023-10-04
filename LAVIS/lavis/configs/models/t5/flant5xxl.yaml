@@ -1,0 +1,25 @@
+ # Copyright (c) 2022, salesforce.com, inc.
+ # All rights reserved.
+ # SPDX-License-Identifier: BSD-3-Clause
+ # For full license text, see the LICENSE file in the repo root or https://opensource.org/licenses/BSD-3-Clause
+
+model:
+  arch: flant5xl
+  load_finetuned: False
+
+  pretrained: null
+  finetuned: ""
+
+  # T5
+  t5_model: "google/flan-t5-xxl"
+
+  # generation configs
+  prompt: ""
+
+
+preprocess:
+    text_processor:
+        train:
+          name: "blip_caption"
+        eval:
+          name: "blip_caption"

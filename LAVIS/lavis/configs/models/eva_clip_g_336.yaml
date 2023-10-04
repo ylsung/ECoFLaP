@@ -1,0 +1,15 @@
+ # Copyright (c) 2022, salesforce.com, inc.
+ # All rights reserved.
+ # SPDX-License-Identifier: BSD-3-Clause
+ # For full license text, see the LICENSE file in the repo root or https://opensource.org/licenses/BSD-3-Clause
+
+model:
+  arch: eva_clip
+  model_type: EVA-CLIP-g-336
+  pretrained: /work/users/y/l/ylsung/eva_clip_psz14.pt
+
+preprocess:
+  vis_processor:
+      eval:
+        name: "clip_image_eval"
+        image_size: 336
