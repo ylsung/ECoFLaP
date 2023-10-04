@@ -2,7 +2,7 @@
 
 * Authors: [Yi-Lin Sung](https://ylsung.github.io/), [Jaehong Yoon](https://jaehong31.github.io/), [Mohit Bansal](https://www.cs.unc.edu/~mbansal/)
 * Paper: ["ECoFLaP: Efficient Coarse-to-Fine Layer-Wise Pruning for Vision-Language Models"](https://ylsung.github.io/)
-* [Project Page](https://ylsung.github.io/)
+* [Project Page](https://ecoflap.github.io/)
 
 we propose ECoFLaP, a two-stage coarse-to-fine weight pruning approach for Large Vision-Language Models (LVLMs). We first determine the sparsity ratios of different layers or blocks by leveraging the global importance score, which is efficiently computed based on the zeroth-order approximation of the global model gradients. Then, the multimodal model performs local layer-wise unstructured weight pruning based on the given ratios.
 
@@ -45,3 +45,12 @@ python scripts/sparsegpt.py 0 12341
 
 
 ## Bibtex
+
+```bibtex
+@inproceedings{Sung2023ECoFLaP,
+    author = {Yi-Lin Sung, Jaehong Yoon, Mohit Bansal},
+    title = {ECoFLaP: Efficient Coarse-to-Fine Layer-Wise Pruning for Vision-Language Models},
+    booktitle = {arXiv},
+    year = {2023},
+}
+```
