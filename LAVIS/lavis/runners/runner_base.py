@@ -642,7 +642,7 @@ class RunnerBase:
 
         return output
 
-    def get_dataloader_for_importance_computation(self, num_data=128, power=2):
+    def get_dataloader_for_importance_computation(self, num_data=128, power=2, batch_size=1):
         import transformers
         import torch.nn.functional as F
 
@@ -656,8 +656,6 @@ class RunnerBase:
         # doing the forward
         batch_size_train_record = self.config.run_cfg.batch_size_train
         batch_size_eval_record = self.config.run_cfg.batch_size_eval
-
-        batch_size = 1
 
         self.config.run_cfg.batch_size_train = batch_size
         self.config.run_cfg.batch_size_eval = batch_size

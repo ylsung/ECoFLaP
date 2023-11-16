@@ -35,6 +35,7 @@ class LayerWiseBasePruner(BasePruner):
         num_noise=1,
         sparsity_dict=None,
         noise_eps=1e-3,
+        prune_per_model=False,
         **kwargs,
     ):
         super().__init__(
@@ -54,6 +55,7 @@ class LayerWiseBasePruner(BasePruner):
         self.num_noise = num_noise
         self.sparsity_dict = sparsity_dict
         self.noise_eps = noise_eps
+        self.prune_per_model=prune_per_model
 
         self.prune_spec = prune_spec
         self.model_prefix = model_prefix
@@ -116,7 +118,21 @@ class LayerWiseBasePruner(BasePruner):
 
 
 class LayerSparsity:
-    def __init__(self, model, data_loader, loss_func, num_samples, original_sparsity, max_sparsity_per_layer=0.8, score_method="obd_avg", num_noise=1, noise_eps=1e-3, layer_to_group_mapping={}):
+    def __init__(
+            self, 
+            model, 
+            data_loader, 
+            loss_func, 
+            num_samples, 
+            original_sparsity, 
+            max_sparsity_per_layer=0.8, 
+            score_method="obd_avg", 
+            num_noise=1, 
+            noise_eps=1e-3, 
+            layer_to_group_mapping={}, 
+            prune_per_model=False,
+            per_model_group=[],
+        ):
         self.importance_measure = {}
         self.model = model
         self.data_loader = data_loader
@@ -127,8 +143,10 @@ class LayerSparsity:
         self.max_sparsity_per_layer = max_sparsity_per_layer
         self.num_noise = num_noise
         self.noise_eps = noise_eps
+        self.prune_per_model = prune_per_model
         
         self.score_method = score_method
+        self.per_model_group = per_model_group
         
         if score_method is not None:
             self.score_compute, self.score_aggregate = score_method.split("_")
@@ -286,7 +304,7 @@ class LayerSparsity:
                 total_parameters += v.numel()
         
         # total params to keep
-        total_parameters_to_keep = total_parameters * (1 - original_sparsity)
+        total_parameters_to_keep = int(total_parameters * (1 - original_sparsity))
         
         # store the importance per parameter for each group
         group_scores = {}
@@ -417,12 +435,28 @@ class LayerSparsity:
                 
             return group_sparsity
         
-        group_sparsity = compute_the_sparsity_per_group(
-            total_parameters_to_keep, 
-            group_scores, 
-            group_num_parameters, 
-            max_sparsity_per_layer=self.max_sparsity_per_layer,
-        )
+        if self.prune_per_model:
+            group_sparsity = {}
+            for submodel_prefix in self.per_model_group:
+                print(submodel_prefix)
+                submodel_group_scores = {k: v for k, v in group_scores.items() if k.startswith(submodel_prefix)}
+                submodel_group_num_parameters = {k: v for k, v in group_num_parameters.items() if k.startswith(submodel_prefix)}
+                
+                submodel_total_parameters_to_keep = int(sum(list(submodel_group_num_parameters.values())) * (1 - original_sparsity))
+                submodel_group_sparsity = compute_the_sparsity_per_group(
+                    submodel_total_parameters_to_keep, 
+                    submodel_group_scores, 
+                    submodel_group_num_parameters, 
+                    max_sparsity_per_layer=self.max_sparsity_per_layer,
+                )
+                group_sparsity.update(submodel_group_sparsity)
+        else:
+            group_sparsity = compute_the_sparsity_per_group(
+                total_parameters_to_keep, 
+                group_scores, 
+                group_num_parameters, 
+                max_sparsity_per_layer=self.max_sparsity_per_layer,
+            )
         
         compute_total_keep_parameters = 0
         for k in group_num_parameters:

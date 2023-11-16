@@ -31,13 +31,6 @@ from lavis.processors import *
 from lavis.runners.runner_base import RunnerBase
 from lavis.tasks import *
 
-from lavis.compression.modify_model_with_weight_init import t5_modify_with_weight_init
-
-from lavis.compression.modify_vit_with_weight_init import vit_modify_with_weight_init
-
-from lavis.compression.modify_qformer_with_weight_init import qformer_pruning
-from lavis.compression.woodfisher.woodfisher import WoodFisher
-
 from lavis.compression import load_pruner
 
 
@@ -278,6 +271,12 @@ def parse_args():
         default=1,
     )
     
+    parser.add_argument(
+        "--prunining_dataset_batch_size",
+        type=int,
+        default=1,
+    )
+    
     args = parser.parse_args()
     # if 'LOCAL_RANK' not in os.environ:
     #     os.environ['LOCAL_RANK'] = str(args.local_rank)
@@ -393,7 +392,9 @@ def main():
     runner = RunnerBase(
         cfg=cfg, job_id=None, task=task, model=model, datasets=datasets
     )
-    data_loader = runner.get_dataloader_for_importance_computation(num_data=args.num_data, power=args.power)
+    data_loader = runner.get_dataloader_for_importance_computation(
+        num_data=args.num_data, power=args.power, batch_size=args.prunining_dataset_batch_size
+    )
 
     config = {
         "t5_prune_spec": args.t5_prune_spec if args.t5_pruned_checkpoint is None else None,

@@ -105,6 +105,7 @@ class T5LayerWandaPruner(LayerWiseBasePruner):
         num_noise=1,
         sparsity_dict=None,
         noise_eps=1e-3,
+        prune_per_model=False,
         **kwargs,
     ):
         super().__init__(
@@ -124,6 +125,7 @@ class T5LayerWandaPruner(LayerWiseBasePruner):
             num_noise=num_noise,
             sparsity_dict=sparsity_dict,
             noise_eps=noise_eps,
+            prune_per_model=prune_per_model,
         )
         
         self.loss_func = loss_language
@@ -247,9 +249,11 @@ class T5LayerWandaPruner(LayerWiseBasePruner):
                 raise ValueError
 
         layers[0] = Catcher(layers[0])
+        total_samples = 0
         for i, batch in enumerate(dataloader):
-            if i >= n_samples:
+            if total_samples >= n_samples:
                 break
+            total_samples += batch["image"].shape[0]
             try:
                 # batch = process_input(batch, t5_tokenizer)
                 # print(f"In {i}: ", (torch.cuda.max_memory_allocated() / 1024 ** 2)/1000)
@@ -313,7 +317,7 @@ class T5LayerWandaPruner(LayerWiseBasePruner):
                 h.remove()
 
             for name in subset:
-                assert wrapped_layers[name].nsamples == len(inps)
+                assert wrapped_layers[name].nsamples == len(inps) * inps[0].shape[0]
                 print(f"pruning layer {i} name {name}")
                 W_metric = torch.abs(subset[name].weight.data) * torch.sqrt(wrapped_layers[name].scaler_row.reshape((1,-1)))
 
@@ -392,6 +396,7 @@ class T5LayerWandaPruner(LayerWiseBasePruner):
             self.num_noise,
             self.noise_eps,
             layer_to_group_mapping,
+            prune_per_model=self.prune_per_model,
         )
         
         return sparsity_module.return_sparsity()
@@ -453,6 +458,7 @@ class VITLayerWandaPruner(LayerWiseBasePruner):
         num_noise=1,
         sparsity_dict=None,
         noise_eps=1e-3,
+        prune_per_model=False,
         **kwargs,
     ):
         super().__init__(
@@ -472,6 +478,7 @@ class VITLayerWandaPruner(LayerWiseBasePruner):
             num_noise=num_noise,
             sparsity_dict=sparsity_dict,
             noise_eps=noise_eps,
+            prune_per_model=prune_per_model,
         )
         
         self.loss_func = loss_vision
@@ -596,9 +603,11 @@ class VITLayerWandaPruner(LayerWiseBasePruner):
 
         layers[0] = Catcher(layers[0])
         
+        total_samples = 0
         for i, batch in enumerate(dataloader):
-            if i >= n_samples:
+            if total_samples >= n_samples:
                 break
+            total_samples += batch["image"].shape[0]
             try:
                 # model(batch)
                 # import pdb; pdb.set_trace()
@@ -657,7 +666,7 @@ class VITLayerWandaPruner(LayerWiseBasePruner):
                 h.remove()
 
             for name in subset:
-                assert wrapped_layers[name].nsamples == len(inps)
+                assert wrapped_layers[name].nsamples == len(inps) * inps[0].shape[0]
                 print(f"pruning layer {i} name {name}")
                 W_metric = torch.abs(subset[name].weight.data) * torch.sqrt(wrapped_layers[name].scaler_row.reshape((1,-1)))
                 
@@ -749,6 +758,7 @@ class VITLayerWandaPruner(LayerWiseBasePruner):
             self.num_noise,
             self.noise_eps,
             layer_to_group_mapping,
+            prune_per_model=self.prune_per_model,
         )
         
         return sparsity_module.return_sparsity()
@@ -812,6 +822,7 @@ class BLIPT5LayerWandaPruner(LayerWiseBasePruner):
         num_noise=1,
         sparsity_dict=None,
         noise_eps=1e-3,
+        prune_per_model=False,
         **kwargs,
     ):
         super().__init__(
@@ -831,6 +842,7 @@ class BLIPT5LayerWandaPruner(LayerWiseBasePruner):
             num_noise=num_noise,
             sparsity_dict=sparsity_dict,
             noise_eps=noise_eps,
+            prune_per_model=prune_per_model,
         )
         
         self.t5_prune_spec = t5_prune_spec
@@ -934,6 +946,8 @@ class BLIPT5LayerWandaPruner(LayerWiseBasePruner):
             self.num_noise,
             self.noise_eps,
             layer_to_group_mapping,
+            prune_per_model=self.prune_per_model,
+            per_model_group=[self.t5_model_prefix, self.vit_model_prefix],
         )
         
         return sparsity_module.return_sparsity()
