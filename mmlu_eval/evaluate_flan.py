@@ -6,7 +6,6 @@ import pandas as pd
 from categories import subcategories, categories
 from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
 import time
-from lavis.compression.modify_model_with_weight_init import t5_modify_with_weight_init
 
 
 choices = ["A", "B", "C", "D"]
@@ -108,29 +107,22 @@ def main(args):
     tokenizer = AutoTokenizer.from_pretrained(args.model)
     heads_per_gpu = len(model.encoder.block) // args.ngpu
     
-
-    pruned_indices = None
-    if args.pruned_indices is not None:
-        print(args.pruned_indices)
-        pruned_indices = torch.load(args.pruned_indices)
-
-        pruned_indices = pruned_indices["t5"]
-
     orig_total_size = sum(
         param.numel() for param in model.parameters()
     )
+    
+    if args.pruned_checkpoint is not None:
+        print("Load pruned weight")
+        prune_state_dict = torch.load(args.pruned_checkpoint, map_location="cpu")
+        
+        prune_state_dict = {k: v for k, v in prune_state_dict.items() if k.startswith("t5_model.")}
+        
+        prune_state_dict = {k.replace("t5_model.", ""): v for k, v in prune_state_dict.items()}
+        model.load_state_dict(prune_state_dict)
 
-    model, _ = t5_modify_with_weight_init(model, args, None, pruned_indices=pruned_indices)
-
-
-    if "unstrct" in args.distillation_init:
-        distilled_total_size = sum(
-            (param != 0).sum() for param in model.parameters()
-        )
-    else:
-        distilled_total_size = sum(
-            param.numel() for param in model.parameters()
-        )
+    distilled_total_size = sum(
+        (param != 0).sum() for param in model.parameters()
+    )
 
     device_map = {
         gpu: list(
@@ -270,6 +262,9 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--pruned_indices", type=str, default=None
+    )
+    parser.add_argument(
+        "--pruned_checkpoint", type=str, default=None
     )
     args = parser.parse_args()
     main(args)
