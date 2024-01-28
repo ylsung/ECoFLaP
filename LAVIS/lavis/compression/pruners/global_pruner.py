@@ -75,7 +75,7 @@ class BLIPT5GlobalPruner(LayerWiseBasePruner):
         vit_model_prefix="visual_encoder",
         sparsity_ratio_granularity=None,
         max_sparsity_per_layer=0.8,
-        score_method="obd_avg",
+        score_method="GradMagSquare_avg",
         num_data_first_stage=128,
         num_noise=1,
         sparsity_dict=None,
@@ -243,17 +243,17 @@ class BLIPT5GlobalPruner(LayerWiseBasePruner):
         
         return self.model, None
     
-@registry.register_pruner("blipt5_mag_pruner")
-class BLIPT5MagPruner(BLIPT5GlobalPruner):
-    pruner_name = "blipt5_mag_pruner"
+@registry.register_pruner("blipt5_global_mag_pruner")
+class BLIPT5GlobalMagPruner(BLIPT5GlobalPruner):
+    pruner_name = "blipt5_global_mag_pruner"
     
     def compute_importance_scores(self, model, data_loader=None, dict_layers_to_prune={}, loss_func=None):
         return {k: v.data.float().cpu() for k, v in model.named_parameters()}
     
 
-@registry.register_pruner("blipt5_aobd_pruner")
-class BLIPT5AOBDPruner(BLIPT5GlobalPruner):
-    pruner_name = "blipt5_aobd_pruner"
+@registry.register_pruner("blipt5_global_gradmagabs_pruner")
+class BLIPT5GlobalGradMagAbsPruner(BLIPT5GlobalPruner):
+    pruner_name = "blipt5_global_gradmagabs_pruner"
     
     @print_time
     def compute_importance_scores(self, model, data_loader=None, dict_layers_to_prune={}, loss_func=None):
@@ -294,20 +294,15 @@ class BLIPT5AOBDPruner(BLIPT5GlobalPruner):
             # the batch size might not be 1, and the loss is already normalized by 
             # batch size, now when only have to normalize it by num_batches now
             gradients_dict[k] /= current_batch_index
-            
-        # torch.save({k: v.cpu().abs() for k, v in zip(names, params)}, "pruned_checkpoint/magnitude.pth")
-        
-        # torch.save(gradients_dict, "pruned_checkpoint/first_order_grad.pth")
-        
-        # exit()
+
         importance_measure = {k: (v.cpu().data.float().abs()) * gradients_dict[k].abs() for k, v in zip(names, params)}
         
         return importance_measure
     
 
-@registry.register_pruner("blipt5_mezo_pruner")
-class BLIPT5AMeZoPruner(BLIPT5GlobalPruner):
-    pruner_name = "blipt5_mezo_pruner"
+@registry.register_pruner("blipt5_global_mezo_pruner")
+class BLIPT5GlobalMeZoPruner(BLIPT5GlobalPruner):
+    pruner_name = "blipt5_global_mezo_pruner"
     
     def zo_perturb_parameters(self, params, random_seed=1, scaling_factor=1, zo_eps=1e-3):
         """

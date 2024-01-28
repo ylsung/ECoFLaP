@@ -9,7 +9,7 @@ port = sys.argv[2]
 method = "blipt5_wanda_pruner"
 sparsity_ratio_granularity = "block"
 
-score_method = "aobd_sum"
+score_method = "GradMagAbs_sum"
 
 ratio = 0.5
 ratios = f"{ratio}-1.0-1.0"
@@ -23,6 +23,7 @@ f" --nproc_per_node=1 --master_port {port} evaluate_blip.py"
 f" --cfg-path lavis/projects/blip2/eval/cc_prefix_derivative_compute.yaml"
 f" --pruning_method '{method}' --save_pruned_model"
 f" --score_method {score_method}"
+f" --sparsity_ratio_granularity {sparsity_ratio_granularity}"
 f" --max_sparsity_per_layer {max_sparsity_per_layer}"
 f" --num_data_first_stage 128"
 f" --t5_prune_spec 24-{ratios} --vit_prune_spec 39-{ratios} --job_id '{job_id}'")

@@ -6,9 +6,9 @@ import sys
 GPU = sys.argv[1]
 port = sys.argv[2]
 
-method = "blipt5_aobd_pruner"
+method = "blipt5_global_gradmagabs_pruner"
 
-ratio = 0.4
+ratio = 0.5
 ratios = f"{ratio}-1.0-1.0"
 
 iteration = 3

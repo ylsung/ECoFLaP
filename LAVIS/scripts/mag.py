@@ -6,9 +6,9 @@ import sys
 GPU = sys.argv[1]
 port = sys.argv[2]
 
-method = "blipt5_mag_pruner"
+method = "blipt5_global_mag_pruner"
 
-ratio = 0.4
+ratio = 0.5
 ratios = f"{ratio}-1.0-1.0"
 
 max_sparsity_per_layer = f"{round(1.0 - ratio + 0.1, 1)}"
