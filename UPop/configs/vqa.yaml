@@ -1,0 +1,26 @@
+vqa_root: '/nas/longleaf/home/ylsung/work/data/coco/images/'
+vg_root: '/nas/longleaf/home/ylsung/work/data/vg/'
+train_files: ['vqa_train','vqa_val', 'vg_qa']
+ann_root: '/nas/longleaf/home/ylsung/work/data/upop_data'
+
+
+# set pretrained as a file path or an url
+pretrained: 'pretrained/model_base_vqa_capfilt_large.pth' # for evaluate
+
+# size of vit model; base or large
+vit: 'base'
+batch_size_train: 24 
+batch_size_test: 48 
+vit_grad_ckpt: False
+vit_ckpt_layer: 0
+init_lr: 2e-5
+
+image_size: 480
+
+k_test: 128
+inference: 'rank'
+
+# optimizer
+weight_decay: 0.05
+min_lr: 0
+max_epoch: 10
