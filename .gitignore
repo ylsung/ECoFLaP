@@ -164,5 +164,7 @@ slurm-*
 submit_*
 outputs/
 results/
+llm_weights/
+out/
 
 cache/

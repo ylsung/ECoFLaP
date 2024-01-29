@@ -27,7 +27,6 @@ Follow the scripts in `lavis/datasets/download_scripts/` to download the dataset
 ### BLIP-2 Scripts
 
 ```bash
-
 ## BLIP-2 experiments
 
 # ECoFLaP - zeroth order
@@ -46,19 +45,16 @@ python scripts/blip2/sparsegpt.py 0 12341
 ### ViT Scripts
 
 ```bash
-
 # ECoFLaP - zeroth order
 python scripts/eva_clip/ecoflap.py 0 12341
 
 # Wanda
 python scripts/eva_clip/wanda.py 0 12341
-
 ```
 
 ### FlanT5 Scripts
 
 ```bash
-
 ### Generate the pruned checkpoint
 
 # ECoFLaP - zeroth order
@@ -71,7 +67,6 @@ cd ../mmlu_eval
 
 # Make sure to assign pruned_checkpoint to the checkpoint generated in the previous step
 bash test.sh 
-
 ```
 
 ## CLIP experiments
@@ -91,13 +86,11 @@ Follow the scripts in `DATASETS.md` to download the datasets.
 ### Scripts
 
 ```bash
-
 # Wanda and ECoFLaP (w/ Wanda)
 bash scripts/coop/ecoflap_wanda.sh
 
 # SparseGPT and ECoFLaP (w/ SparseGPT)
 bash scripts/coop/ecoflap_sparsegpt.sh
-
 ```
 
 
@@ -128,7 +121,25 @@ bash ecoflap_scripts/${task}/ecoflap.sh
 
 # Fine-tune the pruned checkpoint obtained by ECoFLaP
 bash ecoflap_scripts/${task}/ecoflap_finetuning.sh
+```
 
+
+## LLaMA experiments
+
+The main code for this part is in `LLaMA/`. Please do everything in LLaMA/ by `cd LLaMA/`.
+
+### Installation
+
+Follow the scripts in `Install.md`.
+
+
+### Scripts
+
+I removed `--cache_dir` so the program will read the cache that store in `$HF_HOME$` (if specified) or default cache directory.
+
+```bash
+# ECoFLaP
+bash scripts/ecoflap_zero.sh
 ```
 
 
