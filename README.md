@@ -139,7 +139,7 @@ I removed `--cache_dir` so the program will read the cache that store in `$HF_HO
 
 ```bash
 # ECoFLaP
-bash scripts/ecoflap_zero.sh
+bash scripts/ecoflap_zero.sh 0
 ```
 
 
