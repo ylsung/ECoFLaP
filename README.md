@@ -1,4 +1,4 @@
-# ECoFLaP: Efficient Coarse-to-Fine Layer-Wise Pruning for Vision-Language Models
+# ECoFLaP: Efficient Coarse-to-Fine Layer-Wise Pruning for Vision-Language Models (ICLR 2024)
 
 * Authors: [Yi-Lin Sung](https://ylsung.github.io/), [Jaehong Yoon](https://jaehong31.github.io/), [Mohit Bansal](https://www.cs.unc.edu/~mbansal/)
 * Paper: ["ECoFLaP: Efficient Coarse-to-Fine Layer-Wise Pruning for Vision-Language Models"](https://arxiv.org/abs/2310.02998)
