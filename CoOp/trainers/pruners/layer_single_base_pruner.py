@@ -238,7 +238,7 @@ class LayerSparsity:
         
         return sparsity_dict
     
-    def compute_the_sparsity_per_group(total_parameters_to_keep, group_scores, group_num_parameters, max_sparsity_per_layer=0.8):
+    def compute_the_sparsity_per_group(self, total_parameters_to_keep, group_scores, group_num_parameters, max_sparsity_per_layer=0.8):
         scores = torch.FloatTensor(list(group_scores.values()))
         num_parameters = torch.LongTensor(list(group_num_parameters.values()))
         
