@@ -6,9 +6,9 @@
 from lavis.compression.pruners.base_pruner import BasePruner
 
 from lavis.compression.pruners.global_pruner import (
-    BLIPT5MagPruner,
-    BLIPT5AOBDPruner,
-    BLIPT5AMeZoPruner,
+    BLIPT5GlobalMagPruner,
+    BLIPT5GlobalGradMagAbsPruner,
+    BLIPT5GlobalMeZoPruner,
 )
 
 from lavis.compression.pruners.wanda_pruner import (
