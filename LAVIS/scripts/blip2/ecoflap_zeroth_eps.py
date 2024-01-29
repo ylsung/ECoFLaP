@@ -17,7 +17,7 @@ ratios = f"{ratio}-1.0-1.0"
 
 max_sparsity_per_layer = f"{round(1.0 - ratio + 0.1, 1)}"
 
-for noise_eps in [1e-2, 1e-1]:
+for noise_eps in [1e-1, 1e-2, 1e-4]:
 
     job_id = f"cc3m-{method}_{ratios}_{score_method}{max_sparsity_per_layer}_{sparsity_ratio_granularity}_eps{noise_eps}"
 
@@ -27,6 +27,7 @@ for noise_eps in [1e-2, 1e-1]:
     f" --pruning_method '{method}' --save_pruned_model"
     f" --score_method {score_method}"
     f" --max_sparsity_per_layer {max_sparsity_per_layer}"
+    f" --sparsity_ratio_granularity {sparsity_ratio_granularity}"
     f" --noise_eps {noise_eps}"
     f" --t5_prune_spec 24-{ratios} --vit_prune_spec 39-{ratios} --job_id '{job_id}'")
 
