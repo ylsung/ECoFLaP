@@ -259,7 +259,7 @@ class T5LayerWandaPruner(LayerWiseBasePruner):
                 print(f"pruning layer {i} name {name}")
                 W_metric = torch.abs(subset[name].weight.data) * torch.sqrt(wrapped_layers[name].scaler_row.reshape((1,-1)))
 
-                setattr(subset[name].weight, "importance_score", W_metric.cpu().abs().mean().item())
+                # setattr(subset[name].weight, "importance_score", W_metric.cpu().abs().mean().item())
                 
                 W_mask = (torch.zeros_like(W_metric) == 1)  ## initialize a mask to be all False
                 if self.prune_n != 0:
@@ -540,7 +540,7 @@ class VITLayerWandaPruner(LayerWiseBasePruner):
                 print(f"pruning layer {i} name {name}")
                 W_metric = torch.abs(subset[name].weight.data) * torch.sqrt(wrapped_layers[name].scaler_row.reshape((1,-1)))
                 
-                setattr(subset[name].weight, "importance_score", W_metric.cpu().abs().mean().item())
+                # setattr(subset[name].weight, "importance_score", W_metric.cpu().abs().mean().item())
                 
                 W_mask = (torch.zeros_like(W_metric) == 1)  ## initialize a mask to be all False
                 if self.prune_n != 0:

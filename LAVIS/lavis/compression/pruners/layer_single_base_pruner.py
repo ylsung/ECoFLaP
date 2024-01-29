@@ -330,7 +330,6 @@ class LayerSparsity:
                     return original_sparsity
             return uniform_sparsity_module()
 
-        # self.importance_measure = torch.load("wanda_local_scores.pth", map_location="cpu")
         # compute the global information
         if len(self.importance_measure) == 0:
             if self.score_compute.startswith("MEZO"):
