@@ -523,11 +523,11 @@ class LayerSparsity:
                     
                     self.zo_perturb_parameters([param], random_seed=zo_random_seed, scaling_factor=1, zo_eps=zo_eps)
                     with torch.no_grad():
-                        loss1, batch_len = loss_func(model, d, device != "cpu")
+                        loss1, batch_len = loss_func(model, d, device)
                     
                     self.zo_perturb_parameters([param], random_seed=zo_random_seed, scaling_factor=-2, zo_eps=zo_eps)
                     with torch.no_grad():
-                        loss2, batch_len = loss_func(model, d, device != "cpu")
+                        loss2, batch_len = loss_func(model, d, device)
                 
                     # recover the weight
                     self.zo_perturb_parameters([param], random_seed=zo_random_seed, scaling_factor=1, zo_eps=zo_eps)
