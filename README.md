@@ -10,7 +10,55 @@ We validate our proposed method across various multimodal and unimodal models an
 
 ![](assets/teaser.png)
 
-## BLIP-2, FlanT5, ViT experiments
+## Changelog
+
+* [Feb 2024] Checkpoints are added
+
+## Checkpoints
+
+### BLIP2
+
+Sparsities are all 0.5
+
+| Wanda | ECoFLaP first-order   | ECoFLaP zeroth-order |
+|------------|------------| ------------|
+| [Ckpt](https://drive.google.com/file/d/1XQE0YalFgwCM6FjCWZu-PmFpEkpUU4i5/view?usp=drive_link) | [Ckpt](https://drive.google.com/file/d/1GAJ-4Aln4IHCQmpCNIRJ4AkhwCAEgcAg/view?usp=drive_link) | [Ckpt](https://drive.google.com/file/d/1HOqyltl7KmJ1lDk8JUbt2no0mY_4uaWF/view?usp=drive_link) |
+
+### FlanT5 XL
+
+| Wanda | ECoFLaP first-order   | ECoFLaP zeroth-order |
+|------------|------------| ------------|
+| [Ckpt](https://drive.google.com/file/d/1P3hNvH71f7f1sm8hXBIyevGCvCR8jqAV/view?usp=drive_link) | [Ckpt](https://drive.google.com/file/d/1MncmHfJXPIrzO65VQIk4c0EJvRgEEmFt/view?usp=drive_link) | [Ckpt](https://drive.google.com/file/d/1P52fhVDIm95J_DX8iNV6eRjLsxSHEbqB/view?usp=drive_link) |
+
+### ViT b/16
+
+| Wanda | ECoFLaP first-order   | ECoFLaP zeroth-order |
+|------------|------------| ------------|
+| [Ckpt](https://drive.google.com/file/d/1nzDktg7Y6cTIhCSXyRWp2dMggXGihRQP/view?usp=drive_link) | [Ckpt](https://drive.google.com/file/d/1o_UiCcLfzUuUGlAjcxQEv2yzPNYQuOK3/view?usp=drive_link) | [Ckpt](https://drive.google.com/file/d/17wJVCFUUTb77UsnYoQ6YyMHXugw9OpFN/view?usp=drive_link) |
+
+
+## CLIP
+
+Sparsities are all 0.4
+
+| Wanda | SparseGPT | ECoFLaP w/ Wanda | ECoFLaP w/ SparseGPT |
+|------------|------------|------------|------------|
+| [Ckpt](https://drive.google.com/file/d/1wvCWG0NnE3-Tlvdry7_XoeYlzaiu-ZUQ/view?usp=drive_link) | [Ckpt](https://drive.google.com/file/d/1bcZb-vu_25hloAkW1r1vgcND41jlf15w/view?usp=drive_link) | [Ckpt](https://drive.google.com/file/d/1cOq_wXOiIfIPu7dCrlqMRuSmFaoClYR-/view?usp=drive_link) | [Ckpt](https://drive.google.com/file/d/1pEPklf3Bm4uVmZHdogdQ1Kr_J2oP3rhi/view?usp=drive_link) |
+
+
+## BLIP
+
+Sparsities are all 0.5
+
+| Dataset | Wanda | ECoFLaP | ECoFLaP w/ fine-tuning |
+|------------|------------|------------|------------|
+| VQA | [Ckpt](https://drive.google.com/file/d/1IPcKvhkHGDhlZLSRlGlZR4h6HMHU3iNM/view?usp=drive_link) | [Ckpt](https://drive.google.com/file/d/1l8noCREc3-DrtBaZ3AqVkxcPqh8tWkmB/view?usp=drive_link) | [Ckpt](https://drive.google.com/file/d/117xDKd4iZ_lZXt6NdK0dPUfcaMk_Yh9L/view?usp=drive_link) |
+| NLVR2 | [Ckpt](https://drive.google.com/file/d/1-3CzPIH2v-axciO3lnl2RRcT24GI0GIp/view?usp=drive_link) | [Ckpt](https://drive.google.com/file/d/1-pWH0OVT_bdKLpiO3scMz7zBKqj7_lx1/view?usp=drive_link) | [Ckpt](https://drive.google.com/file/d/123qQpm7XL3D7jSbjpIlXdMIaadTU9-Er/view?usp=drive_link) |
+| Flickr | [Ckpt](https://drive.google.com/file/d/1AiX2m1Itdi5_eQf8Rcl7QfNcquuHfE8j/view?usp=drive_link) | [Ckpt](https://drive.google.com/file/d/14dOt7VLZMM0YfKPJNT9vHUBXNGOAqHBM/view?usp=drive_link) | [Ckpt](https://drive.google.com/file/d/17E0qem-APvzN5UjN9FruqcaPtwhX2Qd4/view?usp=drive_link) |
+| COCO Caption | [Ckpt](https://drive.google.com/file/d/1ji0e1GUlfY1mh8vXrK2N4m3IkaOXh5GC/view?usp=drive_link) | [Ckpt](https://drive.google.com/file/d/1mOHboHiRPpRoUCKu96jsUsMzgepVdUTX/view?usp=drive_link) | [Ckpt](https://drive.google.com/file/d/1VMpITHZpvqgq27Hc6BJ3tAMUxdXGgX64/view?usp=drive_link) |
+
+
+## BLIP-2, FlanT5, ViT experiment scripts
 
 The main code for this part is in `LAVIS/`. Please do everything in LAVIS/ by `cd LAVIS/`.
 
