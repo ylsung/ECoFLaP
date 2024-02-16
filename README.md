@@ -57,7 +57,7 @@ Sparsities are all 0.5
 | Flickr | [Ckpt](https://drive.google.com/file/d/1AiX2m1Itdi5_eQf8Rcl7QfNcquuHfE8j/view?usp=drive_link) | [Ckpt](https://drive.google.com/file/d/14dOt7VLZMM0YfKPJNT9vHUBXNGOAqHBM/view?usp=drive_link) | [Ckpt](https://drive.google.com/file/d/17E0qem-APvzN5UjN9FruqcaPtwhX2Qd4/view?usp=drive_link) |
 | COCO Caption | [Ckpt](https://drive.google.com/file/d/1ji0e1GUlfY1mh8vXrK2N4m3IkaOXh5GC/view?usp=drive_link) | [Ckpt](https://drive.google.com/file/d/1mOHboHiRPpRoUCKu96jsUsMzgepVdUTX/view?usp=drive_link) | [Ckpt](https://drive.google.com/file/d/1VMpITHZpvqgq27Hc6BJ3tAMUxdXGgX64/view?usp=drive_link) |
 
-* Some additional results regard BLIP models
+* Some additional results regarding BLIP models
 
 
 |Methods | VQA (test dev) | Flickr30k (TR@1/IR@1) | NLVR2 (val/text) | COCO Cap. (CIDEr/SPICE) |
