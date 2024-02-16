@@ -57,6 +57,18 @@ Sparsities are all 0.5
 | Flickr | [Ckpt](https://drive.google.com/file/d/1AiX2m1Itdi5_eQf8Rcl7QfNcquuHfE8j/view?usp=drive_link) | [Ckpt](https://drive.google.com/file/d/14dOt7VLZMM0YfKPJNT9vHUBXNGOAqHBM/view?usp=drive_link) | [Ckpt](https://drive.google.com/file/d/17E0qem-APvzN5UjN9FruqcaPtwhX2Qd4/view?usp=drive_link) |
 | COCO Caption | [Ckpt](https://drive.google.com/file/d/1ji0e1GUlfY1mh8vXrK2N4m3IkaOXh5GC/view?usp=drive_link) | [Ckpt](https://drive.google.com/file/d/1mOHboHiRPpRoUCKu96jsUsMzgepVdUTX/view?usp=drive_link) | [Ckpt](https://drive.google.com/file/d/1VMpITHZpvqgq27Hc6BJ3tAMUxdXGgX64/view?usp=drive_link) |
 
+* Some additional results regard BLIP models
+
+
+|Methods | VQA (test dev) | Flickr30k (TR@1/IR@1) | NLVR2 (val/text) | COCO Cap. (CIDEr/SPICE) |
+|------------|------------|------------|------------|------------|
+|Full model | 77.4 | 96.8/86.9 | 82.3/83.6 | 133.3/23.8 |
+|Wanda (w/o fine-tuning) | 71.9 | 85.3/72.3 |  78.3/78.1 | 97.1/18.4 |
+|ECoFLaP (w/o fine-tuning) | 73.6 |	90.2/79.5 | 79.1/79.2 | 111.0/20.3 |
+|UPop (w/ fine-tuning) | 76.3| 94.0/82.0 | 80.3/81.1 | 128.9/23.3| 
+|ECoFLaP (w/ fine-tuning) | 76.7 |	96.8/85.6 | 81.8/82.5 | 132.3/23.8 |
+
+
 
 ## BLIP-2, FlanT5, ViT experiment scripts
 
